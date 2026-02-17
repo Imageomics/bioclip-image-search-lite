@@ -242,11 +242,7 @@ class BioCLIPLiteApp:
         species = meta.get("species") or meta.get("scientific_name") or "Unknown"
         dist = meta.get("distance", 0)
 
-        tax_parts = []
-        for k in ("kingdom", "phylum", "class", "order", "family", "genus"):
-            tax_parts.append(meta.get(k) or "-")
-        tax_str = " > ".join(tax_parts)
-
+        # Source link
         source = meta.get("source_dataset", "Unknown")
         source_id = meta.get("source_id", "")
         if source and source.lower() == "gbif" and source_id:
@@ -255,77 +251,103 @@ class BioCLIPLiteApp:
             source_display = source or "Unknown"
 
         url = meta.get("identifier", "")
-        url_link = f"[View Original]({url})" if url else ""
         img_status = meta.get("image_status", "")
-        status_line = f"**Image Status:** {img_status}" if img_status != "ok" else ""
 
-        return f"""**#{rank} {common}**
-*{species}*
-**Distance:** {dist:.4f}
+        # Build structured markdown
+        lines = [
+            f"### #{rank} {common}",
+            f"*{species}*",
+            "",
+            f"**Distance:** `{dist:.4f}`",
+            "",
+            "---",
+            "",
+            "#### Taxonomy",
+            "",
+            "| Rank | Name |",
+            "| :--- | :--- |",
+        ]
+        for label, key in [
+            ("Kingdom", "kingdom"), ("Phylum", "phylum"), ("Class", "class"),
+            ("Order", "order"), ("Family", "family"), ("Genus", "genus"),
+            ("Species", "species"),
+        ]:
+            val = meta.get(key) or "—"
+            lines.append(f"| {label} | {val} |")
 
-**Taxonomy:** Kingdom > Phylum > Class > Order > Family > Genus
-{tax_str}
+        lines += [
+            "",
+            "---",
+            "",
+            "#### Source",
+            "",
+            f"| | |",
+            f"| :--- | :--- |",
+            f"| **Dataset** | {source_display} |",
+            f"| **Publisher** | {meta.get('publisher') or '—'} |",
+            f"| **Type** | {meta.get('img_type') or '—'} |",
+        ]
 
-**Source:** {source_display}
-**Type:** {meta.get('img_type', 'Unknown')}
-**Publisher:** {meta.get('publisher', 'Unknown')}
-{url_link}
-{status_line}""".strip()
+        if url:
+            lines.append(f"| **URL** | [View Original]({url}) |")
+
+        if img_status and img_status != "ok":
+            lines += ["", f"> Image status: `{img_status}`"]
+
+        return "\n".join(lines)
 
     @staticmethod
     def _generate_tree_summary(metadata_list: List[Dict]) -> str:
         if not metadata_list:
             return "No results to summarize."
 
-        tree = defaultdict(
-            lambda: defaultdict(
-                lambda: defaultdict(
-                    lambda: defaultdict(lambda: defaultdict(int))
-                )
-            )
-        )
+        # Build nested tree: kingdom > phylum > class > order > family > genus > species
+        RANKS = ("kingdom", "phylum", "class", "order", "family", "genus", "species")
+
+        def _nested():
+            return defaultdict(_nested)
+
+        root = _nested()
         for m in metadata_list:
-            tree[m.get("kingdom") or "Unknown"][
-                m.get("phylum") or "Unknown"
-            ][m.get("class") or "Unknown"][m.get("order") or "Unknown"][
-                m.get("family") or "Unknown"
-            ] += 1
+            node = root
+            for r in RANKS:
+                node = node[m.get(r) or "Unknown"]
+
+        def _count(node) -> int:
+            if not node:
+                return 1  # leaf
+            return sum(_count(child) for child in node.values())
+
+        def _render(node, prefix="", is_last_list=None):
+            """Recursively render the tree with box-drawing characters."""
+            if is_last_list is None:
+                is_last_list = []
+            lines = []
+            items = sorted(node.items())
+            for i, (name, children) in enumerate(items):
+                is_last = i == len(items) - 1
+                count = _count(children)
+
+                # Build the branch prefix
+                if not is_last_list:
+                    connector = "├── " if not is_last else "└── "
+                else:
+                    connector = "├── " if not is_last else "└── "
+
+                line_prefix = ""
+                for prev_last in is_last_list:
+                    line_prefix += "    " if prev_last else "│   "
+
+                lines.append(f"{line_prefix}{connector}{name} ({count})")
+
+                if children:
+                    lines.extend(
+                        _render(children, prefix, is_last_list + [is_last])
+                    )
+            return lines
 
         lines = [f"Search Results: {len(metadata_list)} images", ""]
-        for kingdom, phyla in sorted(tree.items()):
-            k_count = sum(
-                sum(sum(sum(f.values()) for f in o.values()) for o in c.values())
-                for c in phyla.values()
-            )
-            lines.append(f"├── {kingdom} ({k_count})")
-            phyla_list = sorted(phyla.items())
-            for p_idx, (phylum, classes) in enumerate(phyla_list):
-                p_count = sum(
-                    sum(sum(f.values()) for f in o.values()) for o in classes.values()
-                )
-                p_last = p_idx == len(phyla_list) - 1
-                p_pre = "│   └── " if p_last else "│   ├── "
-                p_cont = "        " if p_last else "│       "
-                lines.append(f"{p_pre}{phylum} ({p_count})")
-                classes_list = sorted(classes.items())
-                for c_idx, (cls, orders) in enumerate(classes_list):
-                    c_count = sum(sum(f.values()) for f in orders.values())
-                    c_last = c_idx == len(classes_list) - 1
-                    c_pre = f"{p_cont}└── " if c_last else f"{p_cont}├── "
-                    c_cont = f"{p_cont}    " if c_last else f"{p_cont}│   "
-                    lines.append(f"{c_pre}{cls} ({c_count})")
-                    orders_list = sorted(orders.items())
-                    for o_idx, (order, families) in enumerate(orders_list):
-                        o_count = sum(families.values())
-                        o_last = o_idx == len(orders_list) - 1
-                        o_pre = f"{c_cont}└── " if o_last else f"{c_cont}├── "
-                        o_cont = f"{c_cont}    " if o_last else f"{c_cont}│   "
-                        lines.append(f"{o_pre}{order} ({o_count})")
-                        families_list = sorted(families.items())
-                        for f_idx, (family, count) in enumerate(families_list):
-                            f_last = f_idx == len(families_list) - 1
-                            f_pre = f"{o_cont}└── " if f_last else f"{o_cont}├── "
-                            lines.append(f"{f_pre}{family} ({count})")
+        lines.extend(_render(root))
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
