@@ -24,15 +24,11 @@ import gradio as gr
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from src.bioclip_lite.config import LiteConfig, parse_args
+from src.bioclip_lite.config import LiteConfig, parse_args, setup_logging
 from src.bioclip_lite.services.image_service import ImageService
 from src.bioclip_lite.services.model_service import ModelService
 from src.bioclip_lite.services.search_service import SearchService
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 CSS = """
@@ -108,6 +104,7 @@ class BioCLIPLiteApp:
             return None, _prediction_placeholder(), None
 
         img_h = _image_hash(img)
+        logger.info(f"Image uploaded (hash={img_h[:8]}, size={img.size}), embedding + predicting at rank={rank}")
         embedding = self.model_service.embed([img], normalize=False)[0].tolist()
         pred_html = self._predict_html(img, rank)
         return embedding, pred_html, img_h
@@ -148,10 +145,16 @@ class BioCLIPLiteApp:
         )
 
         if not results:
+            logger.info("Search returned 0 results")
             return [], "No results found.", [], cached_embedding, cached_hash
+
+        logger.info(f"FAISS+DuckDB returned {len(results)} results, fetching images...")
 
         # Fetch images from URLs
         results = self.image_service.fetch_images(results)
+
+        ok = sum(1 for r in results if r.get("image_status") == "ok")
+        logger.info(f"Image fetch complete: {ok}/{len(results)} succeeded")
 
         # Build gallery
         gallery_images = []
@@ -518,9 +521,20 @@ def _format_predictions(predictions: List[Dict], rank: str) -> str:
 
 def main():
     config = parse_args()
+    setup_logging(config)
+
+    logger.info("=" * 60)
+    logger.info("BioCLIP Lite — starting up")
+    logger.info(f"  FAISS index: {config.faiss_index_path}")
+    logger.info(f"  DuckDB:      {config.duckdb_path}")
+    logger.info(f"  Device:      {config.device}")
+    logger.info(f"  Scope:       {config.scope}")
+    logger.info(f"  Log dir:     {config.log_dir or '(console only)'}")
+    logger.info("=" * 60)
+
     app = BioCLIPLiteApp(config)
     demo = app.create_interface()
-    logger.info(f"Launching on {config.host}:{config.port}")
+    logger.info(f"Launching Gradio on {config.host}:{config.port}")
     demo.launch(server_name=config.host, server_port=config.port)
 
 

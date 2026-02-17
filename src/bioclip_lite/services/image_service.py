@@ -94,17 +94,31 @@ class ImageService:
         Modifies each dict in-place, adding 'image' (PIL.Image or None)
         and 'image_status' fields.
         """
+        t0 = time.monotonic()
+
         # Partition into rate-limited vs unrestricted
         rate_limited_indices = []
         unrestricted_indices = []
+        no_url_indices = []
 
         for i, item in enumerate(metadata_list):
             url = item.get("identifier") or ""
+            if not url:
+                no_url_indices.append(i)
+                item["image"] = None
+                item["image_status"] = "no_url"
+                continue
             domain = urlparse(url).hostname or ""
             if domain in RATE_LIMITED_DOMAINS:
                 rate_limited_indices.append(i)
             else:
                 unrestricted_indices.append(i)
+
+        logger.debug(
+            f"Fetch plan: {len(unrestricted_indices)} parallel, "
+            f"{len(rate_limited_indices)} rate-limited, "
+            f"{len(no_url_indices)} no-url"
+        )
 
         # Fetch unrestricted URLs in parallel
         if unrestricted_indices:
@@ -134,6 +148,14 @@ class ImageService:
             metadata_list[i]["image"] = img
             metadata_list[i]["image_status"] = status
 
+        dt = time.monotonic() - t0
+        statuses = [m.get("image_status", "?") for m in metadata_list]
+        ok = statuses.count("ok")
+        logger.info(
+            f"Fetched {len(metadata_list)} images in {dt:.2f}s "
+            f"(ok={ok}, no_url={statuses.count('no_url')}, "
+            f"failed={len(metadata_list) - ok - statuses.count('no_url')})"
+        )
         return metadata_list
 
     def _fetch_single(self, url: Optional[str]) -> Tuple[Optional[Image.Image], str]:
@@ -141,20 +163,27 @@ class ImageService:
         if not url:
             return None, "no_url"
 
+        domain = urlparse(url).hostname or "?"
+        t0 = time.monotonic()
         try:
             resp = self.session.get(url, timeout=self.timeout)
+            dt = time.monotonic() - t0
             if resp.status_code == 200:
                 self._track_bytes(url, len(resp.content))
                 img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+                logger.debug(f"OK {domain} {len(resp.content)/1024:.0f}KB {dt:.2f}s")
                 return img, "ok"
             elif resp.status_code == 429:
-                logger.warning(f"Rate limited (429) for {url}")
+                logger.warning(f"Rate limited (429) from {domain} after {dt:.2f}s")
                 return None, "rate_limited"
             else:
+                logger.debug(f"HTTP {resp.status_code} from {domain} after {dt:.2f}s")
                 return None, f"http_{resp.status_code}"
         except requests.Timeout:
+            logger.debug(f"Timeout from {domain} after {self.timeout}s")
             return None, "timeout"
         except Exception as e:
+            logger.debug(f"Error from {domain}: {e}")
             return None, f"error:{str(e)[:80]}"
 
     def fetch_full_resolution(self, url: Optional[str]) -> Tuple[Optional[Image.Image], str]:
