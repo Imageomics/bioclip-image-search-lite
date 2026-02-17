@@ -1,4 +1,4 @@
-# BioCLIP Lite — Image Search
+# BioCLIP Image Search Lite
 
 A lightweight version of the [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) image search system. Upload a photo of an organism and find visually similar images from 200M+ training samples — without needing 92 TB of local image storage.
 
@@ -93,6 +93,28 @@ app.py                   # Gradio frontend
 - **Embed on upload**: The embedding is computed when you upload an image, not when you click Search. Adjusting top_n or nprobe reuses the cached embedding.
 - **iNaturalist rate-limit compliance**: `static.inaturalist.org` URLs are throttled to 1 req/sec. AWS Open Data S3 URLs (`inaturalist-open-data.s3.amazonaws.com`) are fetched in parallel without throttling.
 - **Thumbnails first**: Gallery shows 256px thumbnails. Full resolution is fetched on click.
+
+## Image retrieval and rate-limit compliance
+
+This app doesn't store images — it fetches them from their original sources at query time. The source URL analysis that informed this design is in the upstream repo: [`scripts/research/analyze_source_urls.py`](https://github.com/Imageomics/bioclip-vector-db/blob/main/scripts/research/analyze_source_urls.py).
+
+### Where the images come from
+
+Of the 234M images in the training set, 207M (88%) have stable source URLs. The majority are iNaturalist observations hosted on the [AWS Open Data](https://registry.opendata.aws/inaturalist-open-data/) program (`inaturalist-open-data.s3.amazonaws.com`), which is designed for public bulk access. The remaining URLs point to GBIF, Wikimedia, Flickr, and other providers.
+
+### Respecting image servers
+
+We take rate limiting seriously — especially for iNaturalist, whose [API Recommended Practices](https://www.inaturalist.org/pages/api+recommended+practices) specify strict thresholds (1 req/sec, 5 GB/hr media) with permanent bans for violations.
+
+The key distinction: **AWS Open Data S3 URLs are not subject to iNaturalist rate limits.** These are served from Amazon's infrastructure as part of the Open Data program. Only `static.inaturalist.org` CDN URLs count against iNat's limits — and those are a small fraction of our dataset.
+
+Compliance measures in [`image_service.py`](src/bioclip_lite/services/image_service.py):
+
+- **User-Agent**: Identifies us as `BioCLIP-Lite/1.0 (academic research; imageomics.org)`
+- **Per-domain rate limiting**: Token bucket (1 req/sec) for `static.inaturalist.org`. S3 Open Data URLs are fetched in parallel without throttling.
+- **Bandwidth tracking**: Logs cumulative bytes per domain per session, warns at 4 GB/hr for rate-limited domains
+- **Sequential CDN fetching**: Rate-limited URLs are fetched one at a time, never in parallel
+- **No API calls**: We only fetch images via direct URLs from the metadata DB — no iNaturalist API usage
 
 ## OSC deployment
 

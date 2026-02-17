@@ -174,10 +174,14 @@ class BioCLIPLiteApp:
 
     def on_gallery_select(
         self, evt: gr.SelectData, metadata_list: List[Dict]
-    ) -> Tuple[Optional[Image.Image], str]:
-        """Handle gallery click — show full-res image + metadata."""
+    ) -> Tuple[Optional[Image.Image], str, str, str]:
+        """Handle gallery click — show full-res image + metadata.
+
+        Returns (image, header_md, taxonomy_md, source_md).
+        """
+        empty = (None, "*No image selected*", "", "")
         if not metadata_list or evt.index >= len(metadata_list):
-            return None, "*No image selected*"
+            return empty
 
         meta = metadata_list[evt.index]
 
@@ -190,8 +194,8 @@ class BioCLIPLiteApp:
                 if img:
                     meta["image"] = img
 
-        md = self._format_metadata(meta, evt.index + 1)
-        return img, md
+        header, taxonomy, source = self._format_metadata(meta, evt.index + 1)
+        return img, header, taxonomy, source
 
     def predict_on_rank_change(
         self, img: Optional[Image.Image], rank: str
@@ -238,33 +242,29 @@ class BioCLIPLiteApp:
             return f"<p style='color:#f88;'>Prediction error: {e}</p>"
 
     @staticmethod
-    def _format_metadata(meta: Dict, rank: int) -> str:
+    def _format_metadata(meta: Dict, rank: int) -> Tuple[str, str, str]:
+        """Format metadata into three sections: header, taxonomy, source.
+
+        Returns:
+            (header_md, taxonomy_md, source_md)
+        """
         common = meta.get("common_name") or "Unknown"
         species = meta.get("species") or meta.get("scientific_name") or "Unknown"
         dist = meta.get("distance", 0)
-
-        # Source link
-        source = meta.get("source_dataset", "Unknown")
-        source_id = meta.get("source_id", "")
-        if source and source.lower() == "gbif" and source_id:
-            source_display = f"[GBIF](https://gbif.org/occurrence/{source_id})"
-        else:
-            source_display = source or "Unknown"
-
-        url = meta.get("identifier", "")
         img_status = meta.get("image_status", "")
 
-        # Build structured markdown
-        lines = [
+        # ── Header (always visible above the tabs) ──
+        header_lines = [
             f"### #{rank} {common}",
             f"*{species}*",
             "",
             f"**Distance:** `{dist:.4f}`",
-            "",
-            "---",
-            "",
-            "#### Taxonomy",
-            "",
+        ]
+        if img_status and img_status != "ok":
+            header_lines.append(f"  \n> Image: `{img_status}`")
+
+        # ── Taxonomy tab ──
+        tax_lines = [
             "| Rank | Name |",
             "| :--- | :--- |",
         ]
@@ -274,28 +274,28 @@ class BioCLIPLiteApp:
             ("Species", "species"),
         ]:
             val = meta.get(key) or "—"
-            lines.append(f"| {label} | {val} |")
+            tax_lines.append(f"| {label} | {val} |")
 
-        lines += [
-            "",
-            "---",
-            "",
-            "#### Source",
-            "",
-            f"| | |",
-            f"| :--- | :--- |",
+        # ── Source tab ──
+        source = meta.get("source_dataset", "Unknown")
+        source_id = meta.get("source_id", "")
+        if source and source.lower() == "gbif" and source_id:
+            source_display = f"[GBIF](https://gbif.org/occurrence/{source_id})"
+        else:
+            source_display = source or "Unknown"
+
+        url = meta.get("identifier", "")
+        src_lines = [
+            "| | |",
+            "| :--- | :--- |",
             f"| **Dataset** | {source_display} |",
             f"| **Publisher** | {meta.get('publisher') or '—'} |",
             f"| **Type** | {meta.get('img_type') or '—'} |",
         ]
-
         if url:
-            lines.append(f"| **URL** | [View Original]({url}) |")
+            src_lines.append(f"| **URL** | [View Original]({url}) |")
 
-        if img_status and img_status != "ok":
-            lines += ["", f"> Image status: `{img_status}`"]
-
-        return "\n".join(lines)
+        return "\n".join(header_lines), "\n".join(tax_lines), "\n".join(src_lines)
 
     @staticmethod
     def _generate_tree_summary(metadata_list: List[Dict]) -> str:
@@ -356,8 +356,14 @@ class BioCLIPLiteApp:
     # ------------------------------------------------------------------
 
     def create_interface(self) -> gr.Blocks:
-        with gr.Blocks(title="BioCLIP Lite — Image Search", css=CSS) as demo:
-            gr.Markdown("# BioCLIP Lite — Image Search")
+        with gr.Blocks(title="BioCLIP Image Search Lite", css=CSS) as demo:
+            gr.Markdown(
+                '# BioCLIP Image Search Lite'
+                ' <span title="This is the lightweight version — same model and search,'
+                " but images are fetched from their original sources (like iNaturalist's"
+                ' public S3 bucket) instead of stored locally. That brings the deployment'
+                ' from 92 TB down to ~32 GB." style="cursor:help; opacity:0.5;">(?)</span>'
+            )
 
             # Session state
             embedding_state = gr.State(value=None)
@@ -424,9 +430,14 @@ class BioCLIPLiteApp:
                                 label="Selected Image", height=280,
                                 show_label=False,
                             )
-                            metadata_display = gr.Markdown(
+                            metadata_header = gr.Markdown(
                                 value="*Click an image to see details*"
                             )
+                            with gr.Tabs():
+                                with gr.TabItem("Taxonomy"):
+                                    taxonomy_display = gr.Markdown()
+                                with gr.TabItem("Source"):
+                                    source_display = gr.Markdown()
                         with gr.TabItem("Summary"):
                             tree_summary = gr.Code(
                                 label="Taxonomy Tree", language=None, lines=25,
@@ -466,7 +477,7 @@ class BioCLIPLiteApp:
             gallery.select(
                 self.on_gallery_select,
                 inputs=[metadata_state],
-                outputs=[selected_image, metadata_display],
+                outputs=[selected_image, metadata_header, taxonomy_display, source_display],
             )
 
             # Export
