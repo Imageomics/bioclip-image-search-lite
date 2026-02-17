@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bioclip-image-search-lite"
+version = "0.1.0"
+description = "Lightweight BioCLIP image search using source URLs, FAISS, and DuckDB"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",
+    "pybioclip",
+    "faiss-cpu",
+    "duckdb",
+    "gradio",
+    "Pillow",
+    "requests",
+]
+
+[project.optional-dependencies]
+gpu = ["faiss-gpu-cu12"]
+dev = ["pytest", "black", "isort"]
