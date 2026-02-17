@@ -17,9 +17,7 @@ echo "Node:   $(hostname)"
 echo "Start:  $(date)"
 echo ""
 
-module load miniconda3/24.1.2-py310
-eval "$(conda shell.bash hook)"
-conda activate /fs/scratch/PAS2136/netzissou/conda-envs/faiss_env
+source /fs/scratch/PAS2136/netzissou/venv/bioclip-lite/bin/activate
 
 FAISS_INDEX="/fs/scratch/PAS2136/TreeOfLife/embeddings/vector_db_sample/index_200M_normalized_stratified_merged.index"
 DUCKDB_PATH="/fs/scratch/PAS2136/netzissou/bioclip-lite/data/metadata.duckdb"
