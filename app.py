@@ -156,13 +156,14 @@ class BioCLIPLiteApp:
         ok = sum(1 for r in results if r.get("image_status") == "ok")
         logger.info(f"Image fetch complete: {ok}/{len(results)} succeeded")
 
-        # Build gallery
+        # Build gallery — pass full-res images so Gradio's lightbox popup
+        # shows high quality. Gradio handles grid thumbnail scaling via CSS.
         gallery_images = []
         display_metadata = []
         for r in results:
             pil_img = r.get("image")
             if pil_img:
-                gallery_images.append(self.image_service.make_thumbnail(pil_img))
+                gallery_images.append(pil_img)
             else:
                 label = r.get("species") or r.get("common_name") or "Unknown"
                 gallery_images.append(_placeholder(label))
