@@ -357,13 +357,7 @@ class BioCLIPLiteApp:
 
     def create_interface(self) -> gr.Blocks:
         with gr.Blocks(title="BioCLIP Image Search Lite", css=CSS) as demo:
-            gr.Markdown(
-                '# BioCLIP Image Search Lite'
-                ' <span title="This is the lightweight version — same model and search,'
-                " but images are fetched from their original sources (like iNaturalist's"
-                ' public S3 bucket) instead of stored locally. That brings the deployment'
-                ' from 92 TB down to ~32 GB." style="cursor:help; opacity:0.5;">(?)</span>'
-            )
+            gr.Markdown("# BioCLIP Image Search Lite")
 
             # Session state
             embedding_state = gr.State(value=None)
