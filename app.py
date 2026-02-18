@@ -24,7 +24,7 @@ import gradio as gr
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from src.bioclip_lite.config import LiteConfig, parse_args, setup_logging
+from src.bioclip_lite.config import LiteConfig, parse_args, resolve_data_paths, setup_logging
 from src.bioclip_lite.services.image_service import ImageService
 from src.bioclip_lite.services.model_service import ModelService
 from src.bioclip_lite.services.search_service import SearchService
@@ -550,6 +550,7 @@ def _format_predictions(predictions: List[Dict], rank: str) -> str:
 def main():
     config = parse_args()
     setup_logging(config)
+    resolve_data_paths(config)
 
     logger.info("=" * 60)
     logger.info("BioCLIP Lite — starting up")

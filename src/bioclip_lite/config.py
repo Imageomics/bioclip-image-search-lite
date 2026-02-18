@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+# HF repo containing pre-built FAISS index and DuckDB metadata
+HF_DATA_REPO = "netzhang/bioclip-image-search-lite"
+
 
 @dataclass
 class LiteConfig:
@@ -92,11 +95,47 @@ def setup_logging(config: LiteConfig) -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
+def resolve_data_paths(config: LiteConfig) -> LiteConfig:
+    """Resolve FAISS index and DuckDB paths, downloading from HF if needed.
+
+    If paths are already set (via CLI args), they are used as-is.
+    Otherwise, downloads from the HF data repo using huggingface_hub.
+    """
+    if config.faiss_index_path and config.duckdb_path:
+        return config
+
+    from huggingface_hub import hf_hub_download
+
+    if not config.faiss_index_path:
+        logging.getLogger(__name__).info(
+            f"Downloading FAISS index from {HF_DATA_REPO}..."
+        )
+        config.faiss_index_path = hf_hub_download(
+            repo_id=HF_DATA_REPO, filename="faiss/index.index",
+        )
+
+    if not config.duckdb_path:
+        logging.getLogger(__name__).info(
+            f"Downloading DuckDB metadata from {HF_DATA_REPO}..."
+        )
+        config.duckdb_path = hf_hub_download(
+            repo_id=HF_DATA_REPO, filename="duckdb/metadata.duckdb",
+        )
+
+    return config
+
+
 def parse_args() -> LiteConfig:
     """Parse CLI arguments into a LiteConfig."""
     p = argparse.ArgumentParser(description="BioCLIP Lite Image Search")
-    p.add_argument("--faiss-index", required=True, help="Path to FAISS index file")
-    p.add_argument("--duckdb-path", required=True, help="Path to DuckDB metadata file")
+    p.add_argument(
+        "--faiss-index", default=None,
+        help="Path to FAISS index file (downloaded from HF if omitted)",
+    )
+    p.add_argument(
+        "--duckdb-path", default=None,
+        help="Path to DuckDB metadata file (downloaded from HF if omitted)",
+    )
     p.add_argument("--device", default="cpu", choices=["cpu", "cuda", "mps"])
     p.add_argument("--model-str", default=None, help="Model identifier")
     p.add_argument("--scope", default="all", choices=["all", "url_only", "inaturalist"])
@@ -114,8 +153,8 @@ def parse_args() -> LiteConfig:
     args = p.parse_args()
 
     cfg = LiteConfig(
-        faiss_index_path=args.faiss_index,
-        duckdb_path=args.duckdb_path,
+        faiss_index_path=args.faiss_index or "",
+        duckdb_path=args.duckdb_path or "",
         device=args.device,
         scope=args.scope,
         host=args.host,

@@ -1,3 +1,18 @@
+---
+title: BioCLIP Image Search Lite
+emoji: 🦋
+colorFrom: green
+colorTo: blue
+sdk: gradio
+sdk_version: "6.5.1"
+python_version: "3.10"
+app_file: app.py
+pinned: false
+preload_from_hub:
+  - netzhang/bioclip-image-search-lite faiss/index.index
+  - netzhang/bioclip-image-search-lite duckdb/metadata.duckdb
+---
+
 # BioCLIP Image Search Lite
 
 A lightweight version of the [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) image search system. Upload a photo of an organism and find visually similar images from 200M+ training samples — without needing 92 TB of local image storage.
