@@ -15,6 +15,8 @@ preload_from_hub:
 
 # BioCLIP Image Search Lite
 
+**[Try it live on Hugging Face Spaces](https://huggingface.co/spaces/netzhang/bioclip-image-search-lite)**
+
 A lightweight version of the [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) image search system. Upload a photo of an organism and find visually similar images from 200M+ training samples — without needing 92 TB of local image storage.
 
 The trick: instead of storing images locally, we serve them directly from their source URLs (iNaturalist S3, GBIF, Wikimedia, etc.). This brings the total deployment footprint from ~92 TB down to ~32 GB.
@@ -131,7 +133,13 @@ Compliance measures in [`image_service.py`](src/bioclip_lite/services/image_serv
 - **Sequential CDN fetching**: Rate-limited URLs are fetched one at a time, never in parallel
 - **No API calls**: We only fetch images via direct URLs from the metadata DB — no iNaturalist API usage
 
-## OSC deployment
+## Deployment
+
+### Hugging Face Spaces
+
+The app is hosted on HF Spaces with auto-deploy from GitHub. See [docs/deployment-hf-spaces.md](docs/deployment-hf-spaces.md) for the full setup guide — tokens, data hosting, CI/CD, resource limits, and upgrade options.
+
+### OSC
 
 ```bash
 # One-time: prepare DuckDB
