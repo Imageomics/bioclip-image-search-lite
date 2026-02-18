@@ -109,7 +109,7 @@ app.py                   # Gradio frontend
 
 - **Embed on upload**: The embedding is computed when you upload an image, not when you click Search. Adjusting top_n or nprobe reuses the cached embedding.
 - **iNaturalist rate-limit compliance**: `static.inaturalist.org` URLs are throttled to 1 req/sec. AWS Open Data S3 URLs (`inaturalist-open-data.s3.amazonaws.com`) are fetched in parallel without throttling.
-- **Thumbnails first**: Gallery shows 256px thumbnails. Full resolution is fetched on click.
+- **Full-res images**: Images are fetched at full resolution during search and reused on click.
 
 ## Image retrieval and rate-limit compliance
 

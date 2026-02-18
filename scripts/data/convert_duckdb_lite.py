@@ -52,6 +52,7 @@ def convert_from_sqlite(output_path: str):
     conn.execute("CREATE INDEX idx_id ON metadata (id)")
 
     _add_lite_enhancements(conn)
+    _validate(conn, output_path)
     conn.close()
 
 
@@ -68,6 +69,7 @@ def convert_from_existing_duckdb(source_path: str, output_path: str):
 
     conn = duckdb.connect(output_path)
     _add_lite_enhancements(conn)
+    _validate(conn, output_path)
     conn.close()
 
 
@@ -103,11 +105,9 @@ def _add_lite_enhancements(conn: duckdb.DuckDBPyConnection):
     else:
         print("idx_scope already exists, skipping")
 
-    # Validate
-    _validate(conn)
 
 
-def _validate(conn: duckdb.DuckDBPyConnection):
+def _validate(conn: duckdb.DuckDBPyConnection, output_path: str = OUTPUT_PATH):
     """Print validation stats."""
     total, with_url = conn.execute(
         "SELECT COUNT(*) AS total, "
@@ -130,7 +130,7 @@ def _validate(conn: duckdb.DuckDBPyConnection):
     if total != EXPECTED_ROW_COUNT:
         print(f"WARNING: Expected {EXPECTED_ROW_COUNT:,} rows, got {total:,}")
 
-    size_gb = os.path.getsize(OUTPUT_PATH) / 1024**3
+    size_gb = os.path.getsize(output_path) / 1024**3
     print(f"DuckDB size:    {size_gb:.1f} GB")
 
 
