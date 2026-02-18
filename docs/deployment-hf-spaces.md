@@ -77,14 +77,25 @@ The `preload_from_hub` lines are key — they tell HF to download the FAISS and 
 
 ### 4. Create an HF Token
 
-Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and create a **fine-grained token** with:
+Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and create a **fine-grained** token (not a classic read/write token).
 
-- **Write access** to the Space repo (`spaces/netzhang/bioclip-image-search-lite`)
-- No other permissions needed
+The GitHub Action only needs to `git push` to the Space. The data files are downloaded by HF's own build system via `preload_from_hub` — that works without a token as long as the model repo is public. So the token can be very tightly scoped.
 
-> **Security notes:**
-> - Use a fine-grained token scoped to only the repos it needs. Avoid "all repos" write tokens.
-> - Never commit a token to git. It goes in GitHub Secrets only.
+**What to enable:**
+
+Leave all user-level and org-level permissions **unchecked** (Repositories, Inference, Webhooks, Collections, Discussions, Billing, Jobs — all off). The only thing you configure is the **"Repositories permissions"** override section at the bottom:
+
+1. Search for `spaces/netzhang/bioclip-image-search-lite` (or whatever your Space path is)
+2. Check these two boxes for that repo:
+   - **Read access to contents of selected repos** — needed for the fetch step of `git push`
+   - **Write access to contents/settings of selected repos** — the actual push
+
+That's it. Two permissions, one repo. If this token ever leaks, the blast radius is limited to that single Space.
+
+**When migrating to an org** (e.g., `Imageomics`): create a new token scoped to `spaces/Imageomics/bioclip-image-search-lite`, update the GitHub secret, and update the push URL in the workflow.
+
+> **Security tips:**
+> - Never commit a token to git. It lives in GitHub Secrets only.
 > - If `HF_TOKEN` is set as an environment variable on your local machine, it overrides any cached login token. This has caused confusion before — if pushes fail with a 403, check `echo $HF_TOKEN` first.
 > - Rotate the token if it's ever exposed in logs or commits.
 
@@ -93,7 +104,7 @@ Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) a
 In your GitHub repo: **Settings > Secrets and variables > Actions > New repository secret**
 
 - Name: `HF_TOKEN`
-- Value: the token from step 4
+- Value: the fine-grained token from step 4
 
 ### 6. GitHub Actions auto-sync
 
