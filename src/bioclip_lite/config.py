@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 # HF repo containing pre-built FAISS index and DuckDB metadata
-HF_DATA_REPO = "netzhang/bioclip-image-search-lite"
+HF_DATA_REPO = "imageomics/bioclip-image-search-lite"
 
 
 @dataclass
