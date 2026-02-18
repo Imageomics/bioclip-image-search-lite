@@ -503,11 +503,11 @@ def _format_predictions(predictions: List[Dict], rank: str) -> str:
         v = top.get(key)
         if v:
             parts.append(v)
-    species = top.get("species", "")
+    epithet = top.get("species_epithet", "")
     common = top.get("common_name", "")
     header = " ".join(parts)
-    if species:
-        header += f" {species}"
+    if epithet:
+        header += f" {epithet}"
     if common:
         header += f" ({common})"
 
@@ -523,10 +523,10 @@ def _format_predictions(predictions: List[Dict], rank: str) -> str:
             v = pred.get(key)
             if v:
                 label_parts.append(v)
-        sp = pred.get("species", "")
+        epithet = pred.get("species_epithet", "")
         cn = pred.get("common_name", "")
-        if sp:
-            label_parts.append(sp)
+        if epithet:
+            label_parts.append(epithet)
         label = " ".join(label_parts)
         if cn:
             label += f" ({cn})"
