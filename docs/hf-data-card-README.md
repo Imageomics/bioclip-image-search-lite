@@ -15,12 +15,23 @@ tags:
 - tree-of-life
 - imageomics
 - duckdb
+- image-based-search
+- evolutionary biology
+- taxonomy
+- plants
+- animals
+- fungi
 size_categories:
 - 100M<n<1B
 description: >-
   Pre-computed FAISS index (~200M BioCLIP-2 embeddings) and DuckDB metadata
-  database (234M rows) for image similarity search across the Tree of Life.
-  Derived from the TreeOfLife-200M dataset. No images are redistributed.
+  database (234M rows) for image similarity search across the TreeOfLife-200M dataset. No images from the source dataset are redistributed.
+datasets:
+  - imageomics/TreeOfLife-200M
+  - GBIF
+  - bioscan-ml/BIOSCAN-5M
+  - EOL
+  - FathomNet
 ---
 
 <!--
@@ -34,7 +45,7 @@ No images are stored or redistributed here.
 
 Pre-computed [FAISS](https://github.com/facebookresearch/faiss/wiki) index and [DuckDB](https://duckdb.org/) metadata database powering the
 [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) application —
-a lightweight image similarity search engine over 200M+ organism images from the Tree of Life.
+a lightweight image similarity search engine over the 200M+ organism images from the [TreeOfLife-200M dataset](https://huggingface.co/datasets/imageomics/TreeOfLife-200M).
 
 Upload a photo of any organism and find visually similar images from the
 [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) training set,
@@ -54,18 +65,18 @@ without needing 92 TB of local image storage.
 
 This repository contains two compute artifacts derived from the [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) dataset:
 
-1. **FAISS index** — A trained approximate nearest-neighbor index over ~200M [BioCLIP-2](https://huggingface.co/imageomics/bioclip-2) image embeddings, enabling sub-second similarity search.
+1. **FAISS index** — A trained approximate nearest-neighbor index over ~200M [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) image embeddings, enabling sub-second similarity search. See [Data Collection and Processing](#data-collection-and-processing) for more details.
 2. **DuckDB metadata database** — A 234M-row database mapping each image to its taxonomic classification, source provenance, and original URL.
 
-Together, these enable a full image similarity search pipeline: embed a query image with BioCLIP-2, search the FAISS index for nearest neighbors, and look up rich metadata and source image URLs via DuckDB.
+Together, these enable a full image similarity search pipeline: embed a query image with BioCLIP 2, search the FAISS index for nearest neighbors, and look up rich metadata and source image URLs via DuckDB.
 
-**This repository does not contain or redistribute any images.** It contains only compute artifacts (FAISS index) and metadata (DuckDB database). Images are fetched on-demand from their original source URLs (primarily iNaturalist AWS Open Data, GBIF, and other biodiversity platforms).
+**This repository does not contain or redistribute any images.** It contains only compute artifacts (FAISS index) and metadata (DuckDB database). Images are fetched on-demand from their original source URLs (primarily iNaturalist AWS Open Data and other biodiversity platforms utilizing AWS or similar).
 
 ### Supported Tasks
 
-- **Image similarity search:** Given a query image of an organism, find the most visually similar images across 200M+ samples from the Tree of Life.
+- **Image similarity search:** Given a query image of an organism, find the most visually similar images across 200M+ samples from the TreeofLife dataset.
 - **Taxonomic neighbor discovery:** Explore which species, genera, or families are visually similar to a query organism.
-- **Embedding-based retrieval:** Use the pre-built FAISS index for any downstream task requiring approximate nearest-neighbor search over BioCLIP-2 embeddings.
+- **Embedding-based retrieval:** Use the pre-built FAISS index for any downstream task requiring approximate nearest-neighbor search over BioCLIP 2 embeddings.
 
 
 ## Dataset Structure
@@ -86,7 +97,7 @@ imageomics/bioclip-image-search-lite/
 |----------|-------|
 | **Index type** | `IVF65536,PQ16` ([Inverted File Index](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes#cell-probe-methods-indexivf-indexes) with [Product Quantization](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes#indexivfpq)) |
 | **Vectors** | ~200M |
-| **Dimensions** | 768 (BioCLIP-2 ViT-L/14 output) |
+| **Dimensions** | 768 (BioCLIP 2 ViT-L/14 output) |
 | **Normalization** | L2-normalized (inner product ≈ cosine similarity) |
 | **IVF cells** | 65,536 Voronoi partitions |
 | **PQ encoding** | 16 sub-quantizers, 48 dims each, 256 centroids per sub-quantizer (16 bytes/vector) |
@@ -132,6 +143,8 @@ imageomics/bioclip-image-search-lite/
 
 **Columns from TreeOfLife-200M catalog not included:** `scientific_name`, `basis_of_record`, `shard_filename`, `shard_file_path`, `base_dataset_file_path`, `resolution_status`.
 
+For more background on these columns, please see the [data field descriptions from TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#data-fields).
+
 **Indexes:**
 - `idx_id` on `id` (primary lookup for FAISS result mapping)
 - `idx_scope` on `(source_dataset, has_url)` (scope filtering)
@@ -151,6 +164,8 @@ No predefined splits. The data is used as a single search corpus.
 
 
 ## Usage
+
+Please also see the notes in [Recommendations](#recommendations) for usage suggestions.
 
 ### Searching the FAISS Index
 
@@ -201,7 +216,7 @@ import torch
 import open_clip
 from PIL import Image
 
-# 1. Load BioCLIP-2
+# 1. Load BioCLIP 2
 model, _, preprocess = open_clip.create_model_and_transforms(
     "hf-hub:imageomics/bioclip-2"
 )
@@ -234,7 +249,7 @@ for _, row in results.iterrows():
 
 ### Curation Rationale
 
-The full [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) stores 234M images totaling ~92 TB — far too large for lightweight deployment. BioCLIP Image Search Lite was created to make the same similarity search capability accessible on constrained infrastructure (e.g., Hugging Face Spaces free tier: 2 vCPU, 16 GB RAM, 50 GB disk) by:
+The full [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) stores 234M images totaling ~92 TB — far too large for lightweight deployment. [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) was created to make the similarity search capability accessible on constrained infrastructure (e.g., Hugging Face Spaces free tier: 2 vCPU, 16 GB RAM, 50 GB disk) by:
 
 1. Replacing local image storage with on-demand URL fetching from stable external sources (primarily iNaturalist AWS Open Data S3).
 2. Compressing the metadata from an 80 GB SQLite database to a ~27 GB DuckDB database (optimized via columnar storage and compression).
@@ -248,7 +263,7 @@ This approach trades occasional missing thumbnails (when source URLs are unavail
 
 **Embeddings → FAISS index:**
 
-All 200M+ images in [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) were embedded using the [BioCLIP-2](https://huggingface.co/imageomics/bioclip-2) model (ViT-L/14, 768-dim output). The FAISS index was built in a multi-phase pipeline on the [Ohio Supercomputer Center (OSC)](https://www.osc.edu/) HPC cluster:
+All 200M+ images in [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) were embedded using the [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) model (ViT-L/14, 768-dim output). The FAISS index was built in a multi-phase pipeline on the [Ohio Supercomputer Center (OSC)](https://www.osc.edu/) HPC cluster:
 
 1. **Stratified sampling** (Spark, 80 executors): ~15–20M representative vectors sampled from the full corpus, stratified by taxonomic class using capped proportional sampling (seed=42).
 2. **Index training** (1 GPU): An `IVF65536,PQ16` index was trained on the stratified sample to learn 65,536 IVF centroids and the PQ codebook.
@@ -275,29 +290,29 @@ The Lite repo merged these into a single DuckDB database ([`convert_duckdb_lite.
 #### Source Data Producers
 
 - **Images and taxonomic metadata:** [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M). Taxonomic labels were standardized using [TaxonoPy](https://github.com/Imageomics/TaxonoPy).
-- **Embeddings:** Generated by the [BioCLIP-2](https://huggingface.co/imageomics/bioclip-2) model.
+- **Embeddings:** Generated by the [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) model.
 
 ### Personal and Sensitive Information
 
-This repository does not contain or redistribute any images. However, the metadata includes URLs pointing to source images that may occasionally contain humans in the background (e.g., citizen science observations, museum collection documentation). The upstream [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) dataset applies human detection filtering (YOLOv5) to minimize such occurrences. See the TreeOfLife-200M dataset card for details.
+This repository does not contain or redistribute any images. However, the metadata includes URLs pointing to source images that may occasionally contain humans in the background (e.g., citizen science observations, museum collection documentation). The upstream TreeOfLife-200M dataset applies human face detection filtering to minimize such occurrences. See the [TreeOfLife-200M dataset card (processing section)](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#data-curation-and-processing)  for details.
 
 ### Annotations
 
-This dataset does not include annotations created specifically for this repository. All taxonomic labels, common names, and provenance metadata are inherited directly from the [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) catalog, which in turn sources them from [GBIF](https://www.gbif.org/), [EOL](https://eol.org/), [BIOSCAN-5M](https://github.com/bioscan-ml/BIOSCAN-5M), and [FathomNet](https://www.fathomnet.org/). See the TreeOfLife-200M dataset card for details on annotation processes and provenance.
+This dataset does not include annotations created specifically for this repository. All taxonomic labels, common names, and provenance metadata are inherited directly from the TreeOfLife-200M catalog, which aligned the taxonomic names provided by [GBIF](https://www.gbif.org/), [EOL](https://eol.org/), [BIOSCAN-5M](https://github.com/bioscan-ml/BIOSCAN-5M), and [FathomNet](https://www.fathomnet.org/) using [TaxonoPy](https://imageomics.github.io/TaxonoPy/). See the [TreeOfLife-200M dataset card](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) for details on annotation processes and provenance.
 
 
 ## Considerations for Using the Data
 
 ### Bias, Risks, and Limitations
 
-The following considerations are inherited from [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) and apply to this dataset:
+This dataset inherits biases and considerations from [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#considerations-for-using-the-data). The following are exaggerated in this instance (BioCLIP Image Search Lite) due to available image representation (those readily fetched by URL):
 
-- **Taxonomic coverage is uneven.** Despite including 952K+ unique taxa, coverage is heavily biased toward well-photographed organisms. Citizen science observations (primarily iNaturalist) comprise ~58% of the data, skewing representation toward charismatic species and regions where citizen science is active (Western/developed countries).
-- **Incomplete taxonomic labels.** Only ~89% of records have full species-level taxonomy. ~11% lack complete labels due to biodiversity data complexities (`NULL` values at lower ranks).
-- **Image quality varies.** Source images range from museum specimens to camera-trap photos to citizen science observations. Museum specimens may include non-organismal content (labels, tags). Camera-trap images may contain multiple species.
+- **Taxonomic coverage is uneven.** Despite including 952K+ unique taxa, coverage is heavily biased toward well-photographed organisms. Citizen science observations (primarily iNaturalist) comprise ~58% of the data, skewing representation toward charismatic species and regions where citizen science is most active (Western/developed countries).
+- **Incomplete taxonomic labels.** As inherited from TreeOfLife-200M, only ~89% of records have full species-level taxonomy. ~11% lack complete labels due to biodiversity data complexities (`NULL` values at lower ranks).
+- **Image context varies.** Source images range from museum specimens to camera-trap photos to citizen science observations. Museum specimens may include non-organismal content (labels, tags), and are photographed in unnatural environments. Camera-trap images may contain multiple species and have the same, natural, background across species.
 - **URL availability is not guaranteed.** ~11.6% of records have no source URL. For records with URLs, images may become unavailable over time due to URL rot, server changes, or content removal.
 - **FAISS approximation.** The IVF+PQ index trades exactness for speed. Results are approximate nearest neighbors — some true nearest neighbors may be missed depending on the `nprobe` setting. Higher `nprobe` values improve recall at the cost of latency.
-- **Embedding bias.** Similarity is determined by BioCLIP-2 embeddings, which may encode biases from the training data.
+- **Embedding bias.** Similarity is determined by BioCLIP 2 embeddings, which may encode biases from the training data.
 
 ### Recommendations
 
@@ -311,7 +326,7 @@ The following considerations are inherited from [TreeOfLife-200M](https://huggin
 
 This dataset (the compilation of FAISS index and DuckDB metadata) is dedicated to the public domain under the [CC0 1.0 Universal Public Domain Dedication](https://creativecommons.org/publicdomain/zero/1.0/).
 
-**Important:** This repository does not contain or redistribute any images. The metadata includes URLs pointing to images hosted by their original sources. Individual images retain their original source licenses, which vary by provider (ranging from [CC0](https://creativecommons.org/publicdomain/zero/1.0/) to [CC BY-NC-SA](https://creativecommons.org/licenses/by-nc-sa/4.0/)). Users must respect each image's original license terms when accessing images via the provided URLs. See the [TreeOfLife-200M provenance data](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) for per-image license information.
+**Important:** This repository does not contain or redistribute any images. The metadata includes URLs pointing to images hosted by their original sources. Individual images retain their original source licenses, which vary by provider (ranging from [CC0](https://creativecommons.org/publicdomain/zero/1.0/) to [CC BY-NC-SA](https://creativecommons.org/licenses/by-nc-sa/4.0/)). Users must respect each image's original license terms when accessing images via the provided URLs. More details on licensing by source and per-image license information is provided in [TreeOfLife-200M provenance descriptions](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#licensing-information).
 
 We ask that you cite this dataset and associated papers if you make use of it in your research.
 
@@ -324,7 +339,7 @@ We ask that you cite this dataset and associated papers if you make use of it in
 @misc{zhang2025biocliplite,
   author = {Zhang, Net and Menon, Sreejith and Campolongo, Elizabeth and Thompson, Matthew and Nandi, Arnab and Lapp, Hilmar and Gu, Jianyang},
   title = {{BioCLIP Image Search Lite}},
-  year = {2025},
+  year = {2026},
   url = {https://huggingface.co/imageomics/bioclip-image-search-lite},
   publisher = {Hugging Face}
 }
@@ -385,7 +400,9 @@ Please also cite the source dataset, embedding model, and FAISS library:
 
 This work was supported by the [Imageomics Institute](https://imageomics.org), which is funded by the US National Science Foundation's Harnessing the Data Revolution (HDR) program under [Award #2118240](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2118240) (Imageomics: A New Frontier of Biological Information Powered by Knowledge-Guided Machine Learning). Any opinions, findings and conclusions or recommendations expressed in this material are those of the author(s) and do not necessarily reflect the views of the National Science Foundation.
 
-This work used resources of the [Ohio Supercomputer Center](https://www.osc.edu/) (OSC).
+This work used resources of the [Ohio Supercomputer Center (OSC)](https://www.osc.edu/): Ohio Supercomputer Center. 1987. Ohio Supercomputer Center. Columbus OH: Ohio Supercomputer Center. https://ror.org/01apna436.
+
+
 
 
 ## Dataset Card Authors
