@@ -47,9 +47,9 @@ Pre-computed [FAISS](https://github.com/facebookresearch/faiss/wiki) index and [
 [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) application —
 a lightweight image similarity search engine over the 200M+ organism images from the [TreeOfLife-200M dataset](https://huggingface.co/datasets/imageomics/TreeOfLife-200M).
 
-Upload a photo of any organism and find visually similar images from the
-[TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) training set,
-without needing 92 TB of local image storage.
+The **FAISS index** enables sub-second approximate nearest-neighbor search over ~200M image embeddings, while the **DuckDB database** maps each search record back to its source image URL and other associated metadata. 
+
+> **Why a model repo?** Though this is a data repository, it is hosted as a Hugging Face "model" repo because model repos provide 50 GB of free storage and can be [pre-loaded into a Hugging Face Space](https://huggingface.co/docs/hub/en/spaces-sdks-docker#preloading-models-and-other-data), keeping the index in memory while the Space is active. This lite application relies on URLs that can be queried in real-time to avoid the 92 TB local image storage overhead of the full image set.
 
 ## Dataset Details
 
@@ -57,9 +57,10 @@ without needing 92 TB of local image storage.
 
 - **Curated by:** Net Zhang, Sreejith Menon, Elizabeth Campolongo, Matthew Thompson, Arnab Nandi, Hilmar Lapp, Jianyang Gu <!-- TODO: confirm full author list -->
 - **Homepage:** <https://github.com/Imageomics/bioclip-image-search-lite>
+- **Demo:** [BioCLIP Image Search Lite Space](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite)
 - **Repository:** [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite)
 - **Paper:** [BioCLIP 2: Emergent Properties from Scaling Hierarchical Contrastive Learning](https://arxiv.org/abs/2505.23883)
-- **License:** [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (this compilation; see [Licensing Information](#licensing-information) for details)
+- **License:** [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (FAISS index; metadata inherits upstream licenses — see [Licensing Information](#licensing-information))
 - **Source dataset:** [imageomics/TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M)
 - **Embedding model:** [imageomics/bioclip-2](https://huggingface.co/imageomics/bioclip-2)
 
@@ -251,11 +252,25 @@ for _, row in results.iterrows():
 
 The full [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) stores 234M images totaling ~92 TB — far too large for lightweight deployment. [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) was created to make the similarity search capability accessible on constrained infrastructure (e.g., Hugging Face Spaces free tier: 2 vCPU, 16 GB RAM, 50 GB disk) by:
 
-1. Replacing local image storage with on-demand URL fetching from stable external sources (primarily iNaturalist AWS Open Data S3).
+1. Replacing local image storage with on-demand URL fetching from publicly accessible external sources (primarily [iNaturalist AWS Open Data](https://github.com/inaturalist/inaturalist-open-data) S3).
 2. Compressing the metadata from an 80 GB SQLite database to a ~27 GB DuckDB database (optimized via columnar storage and compression).
 3. Packaging the FAISS index (~5.8 GB) and DuckDB metadata as the only deployment artifacts.
 
 This approach trades occasional missing thumbnails (when source URLs are unavailable) for a >1000x reduction in storage requirements. See [Imageomics/bioclip-vector-db#47](https://github.com/Imageomics/bioclip-vector-db/issues/47#issuecomment-3927846723) for the full design rationale.
+
+#### URL Stability
+
+This dataset relies on external image URLs rather than storing images locally. The majority (~65%) of URLs point to the [iNaturalist Open Data S3 bucket](https://registry.opendata.aws/inaturalist-open-data/) (`inaturalist-open-data.s3.amazonaws.com`), which is publicly accessible without authentication via the [AWS Open Data Sponsorship Program](https://aws.amazon.com/opendata/open-data-sponsorship-program/).
+
+These URLs are **reasonably persistent but not guaranteed stable**:
+
+- **No official stability guarantee.** The iNaturalist Open Data [documentation](https://github.com/inaturalist/inaturalist-open-data/blob/main/README.md) warns: *"There may be rows in these tables pointing to images that are no longer in the bucket having been deleted or moved."*
+- **User-driven changes.** Photos may be removed from the S3 bucket if a user deletes their observation or changes the photo license to "all rights reserved" (only [CC-licensed photos](https://www.inaturalist.org/posts/84932-updated-choosing-licensing-that-allows-scientists-to-use-your-observations) qualify for the AWS-hosted open data bucket).
+- **Historical URL migration.** In 2021, iNaturalist [migrated photo URLs](https://forum.inaturalist.org/t/photo-links-changed/25705) from `static.inaturalist.org` to the S3 bucket, breaking previously stable links.
+- **AWS sponsorship is renewable.** The AWS Open Data Sponsorship runs on a [2-year renewable term](https://aws.amazon.com/opendata/open-data-sponsorship-program/terms/) with no uptime SLA.
+- **No explicit S3 rate limit.** The iNaturalist [API Recommended Practices](https://www.inaturalist.org/pages/api+recommended+practices) recommend <5 GB/hour and <24 GB/day for media downloads, though it is unclear whether this applies to direct S3 access. The [BioCLIP Image Search Lite application](https://github.com/Imageomics/bioclip-image-search-lite) respects these limits regardless.
+
+The remaining URLs point to other biodiversity platforms (EOL, BIOSCAN-5M, FathomNet), each with their own availability characteristics. The ~11.6% of records without any URL are still searchable via the FAISS index but cannot display a source image.
 
 ### Source Data
 
@@ -309,7 +324,6 @@ This dataset inherits biases and considerations from [TreeOfLife-200M](https://h
 
 - **Taxonomic coverage is uneven.** Despite including 952K+ unique taxa, coverage is heavily biased toward well-photographed organisms. Citizen science observations (primarily iNaturalist) comprise ~58% of the data, skewing representation toward charismatic species and regions where citizen science is most active (Western/developed countries).
 - **Incomplete taxonomic labels.** As inherited from TreeOfLife-200M, only ~89% of records have full species-level taxonomy. ~11% lack complete labels due to biodiversity data complexities (`NULL` values at lower ranks).
-- **Image context varies.** Source images range from museum specimens to camera-trap photos to citizen science observations. Museum specimens may include non-organismal content (labels, tags), and are photographed in unnatural environments. Camera-trap images may contain multiple species and have the same, natural, background across species.
 - **URL availability is not guaranteed.** ~11.6% of records have no source URL. For records with URLs, images may become unavailable over time due to URL rot, server changes, or content removal.
 - **FAISS approximation.** The IVF+PQ index trades exactness for speed. Results are approximate nearest neighbors — some true nearest neighbors may be missed depending on the `nprobe` setting. Higher `nprobe` values improve recall at the cost of latency.
 - **Embedding bias.** Similarity is determined by BioCLIP 2 embeddings, which may encode biases from the training data.
@@ -324,7 +338,7 @@ This dataset inherits biases and considerations from [TreeOfLife-200M](https://h
 
 ## Licensing Information
 
-This dataset (the compilation of FAISS index and DuckDB metadata) is dedicated to the public domain under the [CC0 1.0 Universal Public Domain Dedication](https://creativecommons.org/publicdomain/zero/1.0/).
+The FAISS index in this repository is dedicated to the public domain under the [CC0 1.0 Universal Public Domain Dedication](https://creativecommons.org/publicdomain/zero/1.0/). The DuckDB metadata inherits licensing terms from its upstream sources (GBIF, EOL, BIOSCAN-5M, FathomNet); see the [TreeOfLife-200M licensing information](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#licensing-information) for per-record details.
 
 **Important:** This repository does not contain or redistribute any images. The metadata includes URLs pointing to images hosted by their original sources. Individual images retain their original source licenses, which vary by provider (ranging from [CC0](https://creativecommons.org/publicdomain/zero/1.0/) to [CC BY-NC-SA](https://creativecommons.org/licenses/by-nc-sa/4.0/)). Users must respect each image's original license terms when accessing images via the provided URLs. More details on licensing by source and per-image license information is provided in [TreeOfLife-200M provenance descriptions](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#licensing-information).
 
@@ -336,7 +350,7 @@ We ask that you cite this dataset and associated papers if you make use of it in
 <!-- TODO: confirm full author list and add DOI once generated -->
 **Data:**
 ```bibtex
-@misc{zhang2025biocliplite,
+@misc{zhang2026biocliplite,
   author = {Zhang, Net and Menon, Sreejith and Campolongo, Elizabeth and Thompson, Matthew and Nandi, Arnab and Lapp, Hilmar and Gu, Jianyang},
   title = {{BioCLIP Image Search Lite}},
   year = {2026},
@@ -407,7 +421,7 @@ This work used resources of the [Ohio Supercomputer Center (OSC)](https://www.os
 
 ## Dataset Card Authors
 
-Net Zhang, Elizabeth Campolongo <!-- TODO: confirm full author list -->
+Net Zhang, Elizabeth Campolongo 
 
 
 ## Dataset Card Contact
