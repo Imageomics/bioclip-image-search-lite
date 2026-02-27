@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=duckdb_lite_convert
-#SBATCH --output=/fs/scratch/PAS2136/netzissou/bioclip-lite/logs/convert_%j.out
 #SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,17 +10,22 @@
 
 set -euo pipefail
 
+# ── Config ──────────────────────────────────────────────────────────
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+VENV="${BIOCLIP_VENV:?Set BIOCLIP_VENV to your virtualenv path}"
+DATA_DIR="${BIOCLIP_DATA_DIR:?Set BIOCLIP_DATA_DIR to your data directory}"
+
 echo "=== DuckDB Lite Conversion ==="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node:   $(hostname)"
 echo "Start:  $(date)"
 echo ""
 
-source /fs/scratch/PAS2136/netzissou/venv/bioclip-lite/bin/activate
+source "$VENV/bin/activate"
 
-python /users/PZS1008/netzhang/bioclip-image-search-lite/scripts/data/convert_duckdb_lite.py \
-    --from-duckdb /fs/scratch/PAS2136/netzissou/deployment_optimization_research/2a_duckdb_benchmark/metadata.duckdb \
-    --output /fs/scratch/PAS2136/netzissou/bioclip-lite/data/metadata.duckdb
+python "$REPO_ROOT/scripts/data/convert_duckdb_lite.py" \
+    --from-duckdb "${1:?Usage: sbatch convert_duckdb_lite.slurm <source.duckdb>}" \
+    --output "$DATA_DIR/metadata.duckdb"
 
 echo ""
 echo "End: $(date)"

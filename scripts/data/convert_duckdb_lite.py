@@ -6,7 +6,8 @@ Copies the existing research DuckDB and adds Lite-specific enhancements:
   3. URL coverage validation
 
 Usage:
-    python scripts/data/convert_duckdb_lite.py [--from-sqlite | --from-duckdb PATH]
+    python scripts/data/convert_duckdb_lite.py --from-duckdb SOURCE --output OUT
+    python scripts/data/convert_duckdb_lite.py --from-sqlite SOURCE --output OUT
 """
 
 import argparse
@@ -16,21 +17,12 @@ import time
 
 import duckdb
 
-SQLITE_DB = (
-    "/fs/scratch/PAS2136/TreeOfLife/embeddings/vector_db_sample/"
-    "flight_plan/lookup.db"
-)
-EXISTING_DUCKDB = (
-    "/fs/scratch/PAS2136/netzissou/deployment_optimization_research/"
-    "2a_duckdb_benchmark/metadata.duckdb"
-)
-OUTPUT_PATH = "/fs/scratch/PAS2136/netzissou/bioclip-lite/data/metadata.duckdb"
 EXPECTED_ROW_COUNT = 234_391_308
 
 
-def convert_from_sqlite(output_path: str):
+def convert_from_sqlite(sqlite_path: str, output_path: str):
     """Full conversion from the 80 GB SQLite source."""
-    print(f"Converting from SQLite: {SQLITE_DB}")
+    print(f"Converting from SQLite: {sqlite_path}")
     print(f"Output: {output_path}")
 
     if os.path.exists(output_path):
@@ -43,7 +35,7 @@ def convert_from_sqlite(output_path: str):
     print("Transferring 234M rows via sqlite_scan (this takes a while)...")
     conn.execute(f"""
         CREATE TABLE metadata AS
-        SELECT * FROM sqlite_scan('{SQLITE_DB}', 'metadata')
+        SELECT * FROM sqlite_scan('{sqlite_path}', 'metadata')
     """)
     print(f"Transfer completed in {time.time() - t0:.0f}s")
 
@@ -107,7 +99,7 @@ def _add_lite_enhancements(conn: duckdb.DuckDBPyConnection):
 
 
 
-def _validate(conn: duckdb.DuckDBPyConnection, output_path: str = OUTPUT_PATH):
+def _validate(conn: duckdb.DuckDBPyConnection, output_path: str):
     """Print validation stats."""
     total, with_url = conn.execute(
         "SELECT COUNT(*) AS total, "
@@ -136,25 +128,25 @@ def _validate(conn: duckdb.DuckDBPyConnection, output_path: str = OUTPUT_PATH):
 
 def main():
     parser = argparse.ArgumentParser(description="DuckDB Lite conversion")
-    group = parser.add_mutually_exclusive_group()
+    group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
-        "--from-sqlite", action="store_true",
+        "--from-sqlite", type=str, metavar="PATH",
         help="Convert from SQLite source (slow, ~1-2 hours)"
     )
     group.add_argument(
-        "--from-duckdb", type=str, default=EXISTING_DUCKDB,
-        help=f"Copy from existing DuckDB (default: {EXISTING_DUCKDB})"
+        "--from-duckdb", type=str,
+        help="Copy from existing DuckDB and add Lite enhancements"
     )
     parser.add_argument(
-        "--output", type=str, default=OUTPUT_PATH,
-        help=f"Output path (default: {OUTPUT_PATH})"
+        "--output", type=str, required=True,
+        help="Output DuckDB path"
     )
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
     if args.from_sqlite:
-        convert_from_sqlite(args.output)
+        convert_from_sqlite(args.from_sqlite, args.output)
     else:
         convert_from_existing_duckdb(args.from_duckdb, args.output)
 

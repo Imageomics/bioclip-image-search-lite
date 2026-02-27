@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=bioclip_lite
-#SBATCH --output=/fs/scratch/PAS2136/netzissou/bioclip-lite/logs/lite_%j.out
 #SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -12,11 +11,13 @@
 set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────
-VENV="/fs/scratch/PAS2136/netzissou/venv/bioclip-lite"
-APP="/users/PZS1008/netzhang/bioclip-image-search-lite/app.py"
-LOG_DIR="/fs/scratch/PAS2136/netzissou/bioclip-lite/logs"
-FAISS_INDEX="/fs/scratch/PAS2136/TreeOfLife/embeddings/vector_db_sample/index_200M_normalized_stratified_merged.index"
-DUCKDB_PATH="/fs/scratch/PAS2136/netzissou/bioclip-lite/data/metadata.duckdb"
+# Set these environment variables before submitting, or edit the defaults below.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VENV="${BIOCLIP_VENV:?Set BIOCLIP_VENV to your virtualenv path}"
+DATA_DIR="${BIOCLIP_DATA_DIR:?Set BIOCLIP_DATA_DIR to your data directory}"
+LOG_DIR="${DATA_DIR}/logs"
+FAISS_INDEX="${DATA_DIR}/index.faiss"
+DUCKDB_PATH="${DATA_DIR}/metadata.duckdb"
 SESSION="bioclip-lite"
 
 # ── Setup ───────────────────────────────────────────────────────────
@@ -39,7 +40,7 @@ source "$VENV/bin/activate"
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
 tmux new-session -d -s "$SESSION" \
-    "source $VENV/bin/activate && python $APP \
+    "source $VENV/bin/activate && python $REPO_ROOT/app.py \
         --faiss-index $FAISS_INDEX \
         --duckdb-path $DUCKDB_PATH \
         --device cpu \
