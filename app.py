@@ -35,6 +35,7 @@ CSS = """
 .custom-gallery { height: 640px !important; overflow-y: auto !important; }
 .app-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #444; opacity: 0.55; font-size: 0.8em; }
 .app-footer:hover { opacity: 0.85; }
+.app-footer a { color: #f0a030 !important; }
 """
 
 SCOPE_CHOICES = ["All Sources", "URL-Available Only", "iNaturalist Only"]
