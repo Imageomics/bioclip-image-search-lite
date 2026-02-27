@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 CSS = """
 .custom-gallery { height: 640px !important; overflow-y: auto !important; }
+.app-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #444; opacity: 0.55; font-size: 0.8em; }
+.app-footer:hover { opacity: 0.85; }
 """
 
 SCOPE_CHOICES = ["All Sources", "URL-Available Only", "iNaturalist Only"]
@@ -437,6 +439,30 @@ class BioCLIPLiteApp:
                                 label="Taxonomy Tree", language=None, lines=25,
                                 value="Run a search to see summary.",
                             )
+
+            # --- Footer ---
+            gr.Markdown(
+                elem_classes="app-footer",
+                value="For more information on the"
+                " [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2)"
+                " Model creation, see our"
+                " [BioCLIP 2](https://imageomics.github.io/bioclip-2/)"
+                " Project website, and for easier integration of BioCLIP 2,"
+                " checkout [pybioclip](https://github.com/Imageomics/pybioclip). "
+                "To learn more about the data, check out our"
+                " [TreeOfLife-200M Dataset](https://huggingface.co/datasets/imageomics/TreeOfLife-200M).\n\n"
+                "This work was supported by the"
+                " [Imageomics Institute](https://imageomics.org),"
+                " which is funded by the US National Science Foundation's"
+                " Harnessing the Data Revolution (HDR) program under"
+                " [Award #2118240](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2118240)"
+                " (Imageomics: A New Frontier of Biological Information"
+                " Powered by Knowledge-Guided Machine Learning)."
+                " Any opinions, findings and conclusions or recommendations"
+                " expressed in this material are those of the author(s)"
+                " and do not necessarily reflect the views of the"
+                " National Science Foundation."
+            )
 
             # --- Event wiring ---
 
