@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=48G
 #SBATCH --partition=cpu
-#SBATCH --account=PAS2136
+#SBATCH --account=<YOUR_ACCOUNT>   # TODO: set your SLURM account
 
 set -euo pipefail
 
