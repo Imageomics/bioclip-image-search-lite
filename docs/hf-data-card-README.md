@@ -76,7 +76,7 @@ Together, these enable a full image similarity search pipeline: embed a query im
 ### Supported Tasks
 
 - **Image similarity search:** Given a query image of an organism, find the most visually similar images across 200M+ samples from the TreeofLife dataset.
-- **Taxonomic neighbor discovery:** Explore which species, genera, or families are visually similar to a query organism.
+    - Find taxonomic information (e.g., species, genera, families) and explore other available metadata associated to these visually similar images.
 - **Embedding-based retrieval:** Use the pre-built FAISS index for any downstream task requiring approximate nearest-neighbor search over BioCLIP 2 embeddings.
 
 
