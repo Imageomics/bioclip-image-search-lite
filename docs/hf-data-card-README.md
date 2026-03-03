@@ -398,17 +398,6 @@ Please also cite the source dataset, embedding model, and FAISS library:
 }
 ```
 
-**Ohio Supercomputer Center:**
-```bibtex
-@misc{OhioSupercomputerCenter1987,
-  title = {Ohio Supercomputer Center},
-  author = {{Ohio Supercomputer Center}},
-  year = {1987},
-  publisher = {Ohio Supercomputer Center},
-  url = {https://ror.org/01apna436}
-}
-```
-
 
 ## Acknowledgements
 
