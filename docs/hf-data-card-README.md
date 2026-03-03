@@ -56,7 +56,6 @@ The **FAISS index** enables sub-second approximate nearest-neighbor search over 
 ### Dataset Description
 
 - **Curated by:** Net Zhang, Sreejith Menon, Elizabeth Campolongo, Matthew Thompson, Arnab Nandi, Hilmar Lapp, Jianyang Gu <!-- TODO: confirm full author list -->
-- **Homepage:** <https://github.com/Imageomics/bioclip-image-search-lite>
 - **Demo:** [BioCLIP Image Search Lite Space](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite)
 - **Repository:** [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite)
 - **Paper:** [BioCLIP 2: Emergent Properties from Scaling Hierarchical Contrastive Learning](https://arxiv.org/abs/2505.23883)
@@ -76,7 +75,7 @@ Together, these enable a full image similarity search pipeline: embed a query im
 ### Supported Tasks
 
 - **Image similarity search:** Given a query image of an organism, find the most visually similar images across 200M+ samples from the TreeofLife dataset.
-    - Find taxonomic information (e.g., species, genera, families) and explore other available metadata associated to these visually similar images.
+- Find taxonomic information (e.g., species, genera, families) and explore other available metadata associated to these visually similar images.
 - **Embedding-based retrieval:** Use the pre-built FAISS index for any downstream task requiring approximate nearest-neighbor search over BioCLIP 2 embeddings.
 
 
@@ -270,7 +269,7 @@ These URLs are **reasonably persistent but not guaranteed stable**:
 - **AWS sponsorship is renewable.** The AWS Open Data Sponsorship runs on a [2-year renewable term](https://aws.amazon.com/opendata/open-data-sponsorship-program/terms/) with no uptime SLA.
 - **No explicit S3 rate limit.** The iNaturalist [API Recommended Practices](https://www.inaturalist.org/pages/api+recommended+practices) recommend <5 GB/hour and <24 GB/day for media downloads, though it is unclear whether this applies to direct S3 access. The [BioCLIP Image Search Lite application](https://github.com/Imageomics/bioclip-image-search-lite) respects these limits regardless.
 
-The remaining URLs point to other biodiversity platforms (EOL, BIOSCAN-5M, FathomNet), each with their own availability characteristics. The ~11.6% of records without any URL are still searchable via the FAISS index but cannot display a source image.
+The remaining URLs point to other biodiversity platforms ([EOL](https://eol.org/), [BIOSCAN-5M](https://biodiversitygenomics.net/projects/5m-insects/), [FathomNet](https://www.fathomnet.org/)), each with their own availability characteristics. The ~11.6% of records without any URL are still searchable via the FAISS index but cannot display a source image.
 
 ### Source Data
 
