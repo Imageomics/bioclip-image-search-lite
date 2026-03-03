@@ -11,6 +11,26 @@ pinned: false
 preload_from_hub:
   - imageomics/bioclip-image-search-lite faiss/index.index
   - imageomics/bioclip-image-search-lite duckdb/metadata.duckdb
+license: mit
+tags:
+  - biology
+  - biodiversity
+  - embeddings
+  - faiss
+  - bioclip
+  - similarity-search
+  - tree-of-life
+  - imageomics
+  - duckdb
+  - image-based-search
+  - evolutionary-biology
+  - taxonomy
+  - plants
+  - animals
+  - fungi
+description: >-
+  Upload a photo of an organism and find visually similar images from 200M+ TreeOfLife training samples.
+
 ---
 
 # BioCLIP Image Search Lite
@@ -20,6 +40,8 @@ preload_from_hub:
 A lightweight version of the [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) image search system. Upload a photo of an organism and find visually similar images from 200M+ training samples — without needing 92 TB of local image storage.
 
 The trick: instead of storing images locally, we serve them directly from their source URLs (iNaturalist S3, GBIF, Wikimedia, etc.). This brings the total deployment footprint from ~92 TB down to ~32 GB.
+
+**Source code:** [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite)
 
 ## How it works
 
