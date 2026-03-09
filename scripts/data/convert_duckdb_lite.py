@@ -1,13 +1,20 @@
-"""Convert SQLite metadata to optimized DuckDB for BioCLIP Lite.
+"""Convert source metadata to optimized DuckDB for BioCLIP Lite.
 
-Copies the existing research DuckDB and adds Lite-specific enhancements:
-  1. Materialized has_url BOOLEAN column
-  2. Compound index on (source_dataset, has_url) for scope filtering
-  3. URL coverage validation
+Two-stage pipeline:
+  Stage 1 (this script): Import raw metadata from SQLite or DuckDB source,
+           add has_url column, and create a base DuckDB.
+  Stage 2 (optimize_duckdb.py): Apply size optimizations (ENUM types, taxonomy
+           sort, URL prefix split, type downcasting, corruption cleanup).
 
 Usage:
-    python scripts/data/convert_duckdb_lite.py --from-duckdb SOURCE --output OUT
+    # From SQLite source (slow, ~1-2 hours):
     python scripts/data/convert_duckdb_lite.py --from-sqlite SOURCE --output OUT
+
+    # From existing research DuckDB:
+    python scripts/data/convert_duckdb_lite.py --from-duckdb SOURCE --output OUT
+
+    # Then optimize:
+    python scripts/data/optimize_duckdb.py --source OUT --output OPTIMIZED
 """
 
 import argparse
@@ -43,13 +50,13 @@ def convert_from_sqlite(sqlite_path: str, output_path: str):
     print("Creating index on id...")
     conn.execute("CREATE INDEX idx_id ON metadata (id)")
 
-    _add_lite_enhancements(conn)
+    _add_has_url(conn)
     _validate(conn, output_path)
     conn.close()
 
 
 def convert_from_existing_duckdb(source_path: str, output_path: str):
-    """Copy existing research DuckDB and add Lite-specific enhancements."""
+    """Copy existing research DuckDB and add has_url if missing."""
     print(f"Copying from: {source_path}")
     print(f"         to: {output_path}")
 
@@ -60,17 +67,16 @@ def convert_from_existing_duckdb(source_path: str, output_path: str):
     print(f"Copy complete ({os.path.getsize(output_path) / 1024**3:.1f} GB)")
 
     conn = duckdb.connect(output_path)
-    _add_lite_enhancements(conn)
+    _add_has_url(conn)
     _validate(conn, output_path)
     conn.close()
 
 
-def _add_lite_enhancements(conn: duckdb.DuckDBPyConnection):
-    """Add has_url column and compound index for scope filtering."""
-    # Check if has_url already exists
+def _add_has_url(conn: duckdb.DuckDBPyConnection):
+    """Add has_url BOOLEAN column if not present."""
     cols = [r[0] for r in conn.execute("DESCRIBE metadata").fetchall()]
     if "has_url" in cols:
-        print("has_url column already exists, skipping ALTER")
+        print("has_url column already exists, skipping")
     else:
         print("Adding has_url column...")
         t0 = time.time()
@@ -80,23 +86,6 @@ def _add_lite_enhancements(conn: duckdb.DuckDBPyConnection):
             "(identifier IS NOT NULL AND identifier != '')"
         )
         print(f"has_url column populated in {time.time() - t0:.0f}s")
-
-    # Compound index for scope queries
-    existing_indexes = [
-        r[0] for r in conn.execute(
-            "SELECT index_name FROM duckdb_indexes()"
-        ).fetchall()
-    ]
-    if "idx_scope" not in existing_indexes:
-        print("Creating compound index idx_scope(source_dataset, has_url)...")
-        t0 = time.time()
-        conn.execute(
-            "CREATE INDEX idx_scope ON metadata (source_dataset, has_url)"
-        )
-        print(f"Index created in {time.time() - t0:.0f}s")
-    else:
-        print("idx_scope already exists, skipping")
-
 
 
 def _validate(conn: duckdb.DuckDBPyConnection, output_path: str):
@@ -124,10 +113,14 @@ def _validate(conn: duckdb.DuckDBPyConnection, output_path: str):
 
     size_gb = os.path.getsize(output_path) / 1024**3
     print(f"DuckDB size:    {size_gb:.1f} GB")
+    print(f"\nNext step: run optimize_duckdb.py --source {output_path} --output <optimized.duckdb>")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="DuckDB Lite conversion")
+    parser = argparse.ArgumentParser(
+        description="Stage 1: Import metadata into base DuckDB. "
+        "Run optimize_duckdb.py afterward for size optimization."
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--from-sqlite", type=str, metavar="PATH",
@@ -135,11 +128,11 @@ def main():
     )
     group.add_argument(
         "--from-duckdb", type=str,
-        help="Copy from existing DuckDB and add Lite enhancements"
+        help="Copy from existing DuckDB and add has_url column"
     )
     parser.add_argument(
         "--output", type=str, required=True,
-        help="Output DuckDB path"
+        help="Output DuckDB path (base DB, not yet optimized)"
     )
     args = parser.parse_args()
 

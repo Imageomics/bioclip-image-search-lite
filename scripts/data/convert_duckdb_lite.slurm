@@ -23,8 +23,14 @@ echo ""
 
 source "$VENV/bin/activate"
 
-python "$REPO_ROOT/scripts/data/convert_duckdb_lite.py" \
+# Stage 1: Import from source
+python -u "$REPO_ROOT/scripts/data/convert_duckdb_lite.py" \
     --from-duckdb "${1:?Usage: sbatch convert_duckdb_lite.slurm <source.duckdb>}" \
+    --output "$DATA_DIR/metadata_base.duckdb"
+
+# Stage 2: Optimize
+python -u "$REPO_ROOT/scripts/data/optimize_duckdb.py" \
+    --source "$DATA_DIR/metadata_base.duckdb" \
     --output "$DATA_DIR/metadata.duckdb"
 
 echo ""
