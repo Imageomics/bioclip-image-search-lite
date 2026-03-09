@@ -23,14 +23,17 @@ echo ""
 
 source "$VENV/bin/activate"
 
-# Stage 1: Import from source
+BASE_DB=$(mktemp "$DATA_DIR/metadata_base_XXXXXX.duckdb")
+trap 'rm -f "$BASE_DB"' EXIT
+
+# Stage 1: Import from source into temp file
 python -u "$REPO_ROOT/scripts/data/convert_duckdb_lite.py" \
     --from-duckdb "${1:?Usage: sbatch convert_duckdb_lite.slurm <source.duckdb>}" \
-    --output "$DATA_DIR/metadata_base.duckdb"
+    --output "$BASE_DB"
 
-# Stage 2: Optimize
+# Stage 2: Optimize into final output
 python -u "$REPO_ROOT/scripts/data/optimize_duckdb.py" \
-    --source "$DATA_DIR/metadata_base.duckdb" \
+    --source "$BASE_DB" \
     --output "$DATA_DIR/metadata.duckdb"
 
 echo ""
