@@ -46,10 +46,12 @@ class LiteConfig:
     image_fetch_max_workers: int = 8
     thumbnail_max_dim: int = 256
 
-    # Metadata columns to SELECT (15 of 18 — excludes resolution_status, basisOfRecord, scientific_name)
+    # Metadata columns to SELECT from optimized DB.
+    # URL is split into url_prefix_id + identifier_suffix; reconstructed in Python.
     METADATA_COLUMNS: str = (
         'id, uuid, kingdom, phylum, class, "order", family, genus, species, '
-        "common_name, source_dataset, source_id, publisher, img_type, identifier, has_url"
+        "common_name, source_dataset, source_id, publisher, img_type, "
+        "basisOfRecord, url_prefix_id, identifier_suffix, has_url"
     )
 
 
