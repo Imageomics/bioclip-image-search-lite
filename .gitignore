@@ -7,3 +7,6 @@ build/
 *.duckdb
 *.index
 logs/
+
+# SLURM output files
+*.out
