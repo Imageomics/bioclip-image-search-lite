@@ -34,7 +34,7 @@ TAXONOMY_COLS = ["kingdom", "phylum", "class", "order", "family", "genus", "spec
 APP_COLUMNS = [
     "id", "uuid", "kingdom", "phylum", "class", '"order"', "family", "genus",
     "species", "common_name", "source_dataset", "source_id", "publisher",
-    "img_type", "identifier", "has_url",
+    "img_type", "identifier", "has_url", "in_bioclip2_training",
 ]
 
 
@@ -199,6 +199,50 @@ def validate(source_path: str, optimized_path: str):
         passed += 1
     else:
         print(f"  FAIL: invalid kingdoms found: {invalid[:10]}")
+        failed += 1
+
+    # ── 5b. in_bioclip2_training column ─────────────────────────────
+    print("\n=== 5b. in_bioclip2_training Column ===")
+    opt_cols = [r[0] for r in opt.execute("DESCRIBE metadata").fetchall()]
+    src_cols = [r[0] for r in src.execute("DESCRIBE metadata").fetchall()]
+
+    if "in_bioclip2_training" in src_cols and "in_bioclip2_training" in opt_cols:
+        src_training = src.execute(
+            "SELECT COUNT(*) FROM metadata WHERE in_bioclip2_training = true"
+        ).fetchone()[0]
+        opt_training = opt.execute(
+            "SELECT COUNT(*) FROM metadata WHERE in_bioclip2_training = true"
+        ).fetchone()[0]
+        print(f"  Source training count:    {src_training:>15,}")
+        print(f"  Optimized training count: {opt_training:>15,}")
+        if src_training == opt_training:
+            print("  PASS")
+            passed += 1
+        else:
+            print("  FAIL: training count mismatch")
+            failed += 1
+
+        # Spot-check: verify a sample of training rows match
+        sample_training = src.execute(
+            "SELECT id FROM metadata WHERE in_bioclip2_training = true "
+            "ORDER BY random() LIMIT 50"
+        ).fetchall()
+        if sample_training:
+            training_ids = ",".join(str(r[0]) for r in sample_training)
+            opt_check = opt.execute(
+                f"SELECT COUNT(*) FROM metadata "
+                f"WHERE id IN ({training_ids}) AND in_bioclip2_training = true"
+            ).fetchone()[0]
+            if opt_check == len(sample_training):
+                print(f"  PASS (spot-check: {len(sample_training)} training rows verified)")
+                passed += 1
+            else:
+                print(f"  FAIL: only {opt_check}/{len(sample_training)} training rows found")
+                failed += 1
+    elif "in_bioclip2_training" not in src_cols:
+        print("  SKIP: column not in source DB")
+    else:
+        print("  FAIL: column missing from optimized DB")
         failed += 1
 
     # ── 6. Schema and indexes ────────────────────────────────────────

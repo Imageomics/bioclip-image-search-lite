@@ -27,7 +27,7 @@ import duckdb
 EXPECTED_ROW_COUNT = 234_391_308
 
 
-def convert_from_sqlite(sqlite_path: str, output_path: str):
+def convert_from_sqlite(sqlite_path: str, output_path: str, catalog_parquet: str = None):
     """Full conversion from the 80 GB SQLite source."""
     print(f"Converting from SQLite: {sqlite_path}")
     print(f"Output: {output_path}")
@@ -51,11 +51,15 @@ def convert_from_sqlite(sqlite_path: str, output_path: str):
     conn.execute("CREATE INDEX idx_id ON metadata (id)")
 
     _add_has_url(conn)
+    if catalog_parquet:
+        _add_in_bioclip2_training(conn, catalog_parquet)
     _validate(conn, output_path)
     conn.close()
 
 
-def convert_from_existing_duckdb(source_path: str, output_path: str):
+def convert_from_existing_duckdb(
+    source_path: str, output_path: str, catalog_parquet: str = None
+):
     """Copy existing research DuckDB and add has_url if missing."""
     print(f"Copying from: {source_path}")
     print(f"         to: {output_path}")
@@ -68,6 +72,8 @@ def convert_from_existing_duckdb(source_path: str, output_path: str):
 
     conn = duckdb.connect(output_path)
     _add_has_url(conn)
+    if catalog_parquet:
+        _add_in_bioclip2_training(conn, catalog_parquet)
     _validate(conn, output_path)
     conn.close()
 
@@ -86,6 +92,38 @@ def _add_has_url(conn: duckdb.DuckDBPyConnection):
             "(identifier IS NOT NULL AND identifier != '')"
         )
         print(f"has_url column populated in {time.time() - t0:.0f}s")
+
+
+def _add_in_bioclip2_training(conn: duckdb.DuckDBPyConnection, catalog_parquet: str):
+    """Add in_bioclip2_training BOOLEAN column from training catalog.
+
+    Marks rows whose UUID appears in the BioCLIP 2 training catalog.
+    """
+    cols = [r[0] for r in conn.execute("DESCRIBE metadata").fetchall()]
+    if "in_bioclip2_training" in cols:
+        print("in_bioclip2_training column already exists, skipping")
+        return
+
+    print("Adding in_bioclip2_training column...")
+    t0 = time.time()
+    conn.execute("ALTER TABLE metadata ADD COLUMN in_bioclip2_training BOOLEAN DEFAULT false")
+
+    # The catalog uses UUID column; join on normalized UUID
+    conn.execute(f"""
+        UPDATE metadata m SET in_bioclip2_training = true
+        FROM (
+            SELECT DISTINCT uuid FROM read_parquet('{catalog_parquet}')
+        ) c
+        WHERE CAST(m.uuid AS VARCHAR) = CAST(c.uuid AS VARCHAR)
+    """)
+
+    total = conn.execute("SELECT COUNT(*) FROM metadata").fetchone()[0]
+    matched = conn.execute(
+        "SELECT COUNT(*) FROM metadata WHERE in_bioclip2_training = true"
+    ).fetchone()[0]
+    elapsed = time.time() - t0
+    print(f"in_bioclip2_training populated in {elapsed:.0f}s")
+    print(f"  Matched: {matched:,} / {total:,} ({matched/total*100:.1f}%)")
 
 
 def _validate(conn: duckdb.DuckDBPyConnection, output_path: str):
@@ -107,6 +145,14 @@ def _validate(conn: duckdb.DuckDBPyConnection, output_path: str):
     print(f"With URL:       {with_url:>15,}  ({with_url/total*100:.1f}%)")
     print(f"iNaturalist:    {inat_count:>15,}  ({inat_count/total*100:.1f}%)")
     print(f"Without URL:    {total - with_url:>15,}  ({(total-with_url)/total*100:.1f}%)")
+
+    # Check for in_bioclip2_training column
+    cols = [r[0] for r in conn.execute("DESCRIBE metadata").fetchall()]
+    if "in_bioclip2_training" in cols:
+        training_count = conn.execute(
+            "SELECT COUNT(*) FROM metadata WHERE in_bioclip2_training = true"
+        ).fetchone()[0]
+        print(f"In training:    {training_count:>15,}  ({training_count/total*100:.1f}%)")
 
     if total != EXPECTED_ROW_COUNT:
         print(f"WARNING: Expected {EXPECTED_ROW_COUNT:,} rows, got {total:,}")
@@ -134,14 +180,18 @@ def main():
         "--output", type=str, required=True,
         help="Output DuckDB path (base DB, not yet optimized)"
     )
+    parser.add_argument(
+        "--catalog-parquet", type=str, default=None,
+        help="Path to BioCLIP 2 training catalog parquet (adds in_bioclip2_training column)"
+    )
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
     if args.from_sqlite:
-        convert_from_sqlite(args.from_sqlite, args.output)
+        convert_from_sqlite(args.from_sqlite, args.output, args.catalog_parquet)
     else:
-        convert_from_existing_duckdb(args.from_duckdb, args.output)
+        convert_from_existing_duckdb(args.from_duckdb, args.output, args.catalog_parquet)
 
     print("\nDone.")
 

@@ -19,6 +19,7 @@ SCOPE_MAP = {
     "All Sources": "all",
     "URL-Available Only": "url_only",
     "iNaturalist Only": "inaturalist",
+    "BioCLIP 2 Training": "bioclip2_training",
 }
 
 
@@ -80,7 +81,7 @@ class SearchService:
             query_vector: 1-D embedding vector (768-dim for BioCLIP-2).
             top_n: Number of results to return after scope filtering.
             nprobe: Number of IVF partitions to search.
-            scope: "all", "url_only", or "inaturalist".
+            scope: "all", "url_only", "inaturalist", or "bioclip2_training".
 
         Returns:
             List of result dicts ordered by distance, each containing
@@ -130,20 +131,19 @@ class SearchService:
         distances: List[float],
         scope: str,
     ) -> List[Dict[str, Any]]:
-        """Query DuckDB for metadata, applying scope filter."""
-        id_list = ",".join(str(i) for i in ids)
+        """Query DuckDB for metadata, filtering by scope in Python.
 
-        where = [f"id IN ({id_list})"]
-        if scope == "url_only":
-            where.append("has_url = true")
-        elif scope == "inaturalist":
-            where.append("has_url = true")
-            where.append("source_dataset = 'gbif'")
-            where.append("publisher LIKE '%iNaturalist%'")
+        Scope filtering via SQL WHERE clauses causes ~370x slowdown on
+        ID-based lookups (4ms → 1600ms) because DuckDB scans the full
+        column even when nearly all rows match. Since has_url and
+        in_bioclip2_training are true for >87% of rows, post-filtering
+        in Python is far more efficient.
+        """
+        id_list = ",".join(str(i) for i in ids)
 
         query = (
             f"SELECT {self.metadata_columns} FROM metadata "
-            f"WHERE {' AND '.join(where)}"
+            f"WHERE id IN ({id_list})"
         )
         rows = self.conn.execute(query).fetchall()
         col_names = [desc[0] for desc in self.conn.description]
@@ -163,6 +163,20 @@ class SearchService:
         for fid, dist in zip(ids, distances):
             if fid in meta_map:
                 results.append({"distance": dist, **meta_map[fid]})
+
+        # Apply scope filter in Python (much faster than SQL WHERE)
+        if scope == "url_only":
+            results = [r for r in results if r.get("has_url")]
+        elif scope == "inaturalist":
+            results = [
+                r for r in results
+                if r.get("has_url")
+                and r.get("source_dataset") == "gbif"
+                and "iNaturalist" in (r.get("publisher") or "")
+            ]
+        elif scope == "bioclip2_training":
+            results = [r for r in results if r.get("in_bioclip2_training")]
+
         return results
 
     @property

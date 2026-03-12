@@ -27,7 +27,7 @@ class LiteConfig:
     default_nprobe: int = 16
     over_fetch_factor: int = 3
 
-    # Scope: "all" | "url_only" | "inaturalist"
+    # Scope: "all" | "url_only" | "inaturalist" | "bioclip2_training"
     scope: str = "all"
 
     # Server
@@ -51,7 +51,8 @@ class LiteConfig:
     METADATA_COLUMNS: str = (
         'id, uuid, kingdom, phylum, class, "order", family, genus, species, '
         "common_name, source_dataset, source_id, publisher, img_type, "
-        "basisOfRecord, url_prefix_id, identifier_suffix, has_url"
+        "basisOfRecord, url_prefix_id, identifier_suffix, has_url, "
+        "in_bioclip2_training"
     )
 
 
@@ -140,7 +141,10 @@ def parse_args() -> LiteConfig:
     )
     p.add_argument("--device", default="cpu", choices=["cpu", "cuda", "mps"])
     p.add_argument("--model-str", default=None, help="Model identifier")
-    p.add_argument("--scope", default="all", choices=["all", "url_only", "inaturalist"])
+    p.add_argument(
+        "--scope", default="all",
+        choices=["all", "url_only", "inaturalist", "bioclip2_training"],
+    )
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=7860)
     p.add_argument("--enable-export", action="store_true")

@@ -54,7 +54,7 @@ Everything runs in a single Gradio process. No microservices, no HDF5 files.
 | Component | Size |
 |-----------|------|
 | FAISS index | 5.8 GB |
-| DuckDB metadata | 25.8 GB |
+| DuckDB metadata | ~14 GB (optimized) |
 | Model weights | ~2.5 GB (downloaded on first run) |
 | Image storage | 0 (fetched from source URLs) |
 
@@ -105,15 +105,20 @@ Then open `http://<hostname>:7860` in your browser.
 
 ## Scope filtering
 
-Not all 234M images have source URLs. Use the scope dropdown to control which results appear:
+Use the scope dropdown to control which results appear:
 
 | Scope | Images | Description |
 |-------|--------|-------------|
 | All Sources | 234M | Everything, including results without images |
-| URL-Available Only | 207M (88%) | Only results with fetchable source URLs |
+| URL-Available Only | 234M (99.99%) | Only results with fetchable source URLs |
 | iNaturalist Only | 135M (58%) | iNaturalist observations via AWS Open Data |
+| BioCLIP 2 Training | 206M (88%) | Records used in BioCLIP 2 model training |
 
 The app over-fetches from FAISS (3x by default) and filters post-search, so you still get the requested number of results after filtering.
+
+### Why scope filtering is done in Python
+
+Scope filters (`has_url`, `in_bioclip2_training`, etc.) are applied in Python after the DuckDB query, not as SQL WHERE clauses. Benchmarking showed that adding boolean WHERE clauses to ID-based lookups causes a ~370x slowdown (4ms to 1500ms for 50 IDs) because DuckDB scans the full boolean column rather than using the index for small IN-list queries. Since the majority of rows pass these filters (e.g., 100% have URLs, 88% are in training), fetching all results and filtering in Python adds negligible overhead (~3ms) while keeping query latency low.
 
 ## Architecture
 

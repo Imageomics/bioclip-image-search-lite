@@ -294,6 +294,13 @@ def create_optimized_db(source_path: str, output_path: str):
 
     col_exprs.append("s.has_url")
 
+    # in_bioclip2_training: carry through if present in source
+    src_cols = [r[0] for r in src.execute("DESCRIBE metadata").fetchall()]
+    has_training_col = "in_bioclip2_training" in src_cols
+    if has_training_col:
+        col_exprs.append("s.in_bioclip2_training")
+        print("  Including in_bioclip2_training column")
+
     select_clause = ",\n    ".join(col_exprs)
 
     # Sort order: source_dataset, taxonomy hierarchy, common_name
@@ -323,7 +330,12 @@ def create_optimized_db(source_path: str, output_path: str):
     print(f"  idx_id created in {time.time() - t0:.0f}s")
 
     t0 = time.time()
-    dst.execute("CREATE INDEX idx_scope ON metadata (source_dataset, has_url)")
+    if has_training_col:
+        dst.execute(
+            "CREATE INDEX idx_scope ON metadata (source_dataset, has_url, in_bioclip2_training)"
+        )
+    else:
+        dst.execute("CREATE INDEX idx_scope ON metadata (source_dataset, has_url)")
     print(f"  idx_scope created in {time.time() - t0:.0f}s")
 
     # ── Step 5: Validate ─────────────────────────────────────────────
@@ -446,7 +458,7 @@ def validate(dst: duckdb.DuckDBPyConnection, src: duckdb.DuckDBPyConnection, out
         src.execute(
             f"SELECT id, uuid, kingdom, phylum, class, \"order\", family, genus, species, "
             f"common_name, source_dataset, source_id, publisher, img_type, identifier, has_url "
-            f"FROM src.metadata WHERE id IN ({test_ids})"
+            f"FROM metadata WHERE id IN ({test_ids})"
         ).fetchall()
     avg_ms_src = (time.time() - t0) / 100 * 1000
     print(f"  Avg query time ORIGINAL (10 IDs, 100 runs): {avg_ms_src:.2f} ms")
