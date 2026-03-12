@@ -161,7 +161,7 @@ For more background on these columns, please see the [data field descriptions fr
 | In BioCLIP 2 training (`in_bioclip2_training = TRUE`) | ~206M | 87.9% |
 | With taxonomy (`kingdom IS NOT NULL`) | ~228M | 97.2% |
 
-> **Note on `in_bioclip2_training`:** This column identifies records whose UUID matches the BioCLIP 2 training catalog from [TreeOfLife-200M revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12). The search corpus (234M) is larger than the training set (~206M) because it includes records added after the training data was frozen, as well as records from EOL and other sources not used for training.
+> **Note on `in_bioclip2_training`:** This column identifies records whose UUID matches the BioCLIP 2 training catalog from [TreeOfLife-200M revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12). The original BioCLIP 2 training set contained ~214M images. Of these, ~206M match records in the search corpus. The remaining ~8M were excluded from the FAISS index because they were identified as invalid after training (e.g., document scans, specimen labels, images with detected human faces) and removed during a post-training data cleanup before the embeddings were generated.
 
 ### Data Splits
 
