@@ -264,9 +264,19 @@ def _get_server_info() -> Optional[Dict]:
         info = json.loads(SERVER_INFO_FILE.read_text())
         pid = info.get("pid")
         if pid:
-            os.kill(pid, 0)  # check if alive (signal 0)
-            return info
-    except (json.JSONDecodeError, OSError, ProcessLookupError):
+            # On Windows, os.kill(pid, 0) raises OSError; use ctypes instead
+            if os.name == "nt":
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return info
+                # Process not found — fall through to cleanup
+            else:
+                os.kill(pid, 0)  # check if alive (signal 0)
+                return info
+    except (json.JSONDecodeError, OSError, ProcessLookupError, SystemError):
         # Stale PID file — clean up
         if SERVER_INFO_FILE.exists():
             SERVER_INFO_FILE.unlink(missing_ok=True)
