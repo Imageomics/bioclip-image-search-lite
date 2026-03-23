@@ -624,7 +624,7 @@ def _output_json(results: List[Dict], output_path: Optional[str]) -> None:
     """Write JSON to stdout or file."""
     text = json.dumps(results, indent=2, ensure_ascii=False)
     if output_path and output_path != "-":
-        Path(output_path).write_text(text + "\n")
+        Path(output_path).write_text(text + "\n", encoding="utf-8")
         _eprint(f"Results saved to {output_path}")
     else:
         print(text)
@@ -652,7 +652,7 @@ def _output_table(
     sep_parts = []
     for label, _, width in columns:
         header_parts.append(label.ljust(width))
-        sep_parts.append("─" * width)
+        sep_parts.append("-" * width)
 
     lines = []
     lines.append("  ".join(header_parts))
@@ -679,7 +679,7 @@ def _output_table(
 
     text = "\n".join(lines)
     if output_path and output_path != "-":
-        Path(output_path).write_text(text + "\n")
+        Path(output_path).write_text(text + "\n", encoding="utf-8")
         _eprint(f"Results saved to {output_path}")
     else:
         print(text)
@@ -690,7 +690,7 @@ def _output_csv(results: List[Dict], output_path: Optional[str]) -> None:
     if not output_path or output_path == "-":
         outfile = sys.stdout
     else:
-        outfile = open(output_path, "w", newline="")
+        outfile = open(output_path, "w", newline="", encoding="utf-8")
 
     try:
         writer = csv.DictWriter(outfile, fieldnames=OUTPUT_FIELDS)
