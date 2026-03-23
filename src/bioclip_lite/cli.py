@@ -735,86 +735,109 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bioclip-search",
         description="Search 234M biological images using BioCLIP 2 embeddings.",
+        epilog=(
+            "examples:\n"
+            "  bioclip-search photo.jpg                          # search (auto-starts server)\n"
+            "  bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table\n"
+            "  bioclip-search photo.jpg --format csv --output results.csv\n"
+            "  bioclip-search photo.jpg --local                  # one-off search, no server\n"
+            "  bioclip-search serve                              # start server in foreground\n"
+            "  bioclip-search status                             # show server info\n"
+            "  bioclip-search stop                               # stop the server\n"
+            "  bioclip-search config --show                      # show current settings\n"
+            "  bioclip-search config --set device cuda           # set a config value\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
         "image",
         help=(
             'Path to query image, or a command: '
             '"config" (manage settings), '
-            '"serve" (start server), '
+            '"serve" (start server in foreground), '
             '"stop" (stop server), '
             '"status" (server status).'
         ),
     )
-    p.add_argument(
+
+    search = p.add_argument_group("search options")
+    search.add_argument(
         "--top-n",
         type=int,
         default=10,
         metavar="N",
         help="Number of results to return (default: 10)",
     )
-    p.add_argument(
+    search.add_argument(
         "--scope",
         default="all",
         choices=["all", "url_only", "inaturalist", "bioclip2_training"],
         help="Filter result scope (default: all)",
     )
-    p.add_argument(
+    search.add_argument(
         "--nprobe",
         type=int,
         default=16,
         metavar="N",
         help="FAISS search depth, higher=slower+better (default: 16)",
     )
-    p.add_argument(
+    search.add_argument(
         "--format",
         choices=["json", "table", "csv"],
         default="json",
         help="Output format (default: json)",
     )
-    p.add_argument(
+    search.add_argument(
         "--output",
         metavar="PATH",
         default=None,
-        help='Output file path; use "-" for stdout (default: stdout for json/table)',
+        help='Output file path; use "-" for stdout (default: stdout)',
     )
-    p.add_argument(
-        "--device",
-        choices=["cpu", "cuda", "mps"],
-        default=None,
-        help="Compute device (default: auto-detect CUDA > MPS > CPU)",
-    )
-    p.add_argument(
-        "--faiss-index",
-        metavar="PATH",
-        default=None,
-        help="FAISS index file (overrides config)",
-    )
-    p.add_argument(
-        "--duckdb-path",
-        metavar="PATH",
-        default=None,
-        help="DuckDB metadata file (overrides config)",
-    )
-    p.add_argument(
+    search.add_argument(
         "--local",
         action="store_true",
         help="Run search locally (skip server, load everything in-process)",
     )
 
-    # Config subcommand arguments (used when image=="config")
-    p.add_argument(
+    server = p.add_argument_group("server/data options (search, serve)")
+    server.add_argument(
+        "--device",
+        choices=["cpu", "cuda", "mps"],
+        default=None,
+        help="Compute device (default: auto-detect CUDA > MPS > CPU)",
+    )
+    server.add_argument(
+        "--faiss-index",
+        metavar="PATH",
+        default=None,
+        help="FAISS index file (overrides config)",
+    )
+    server.add_argument(
+        "--duckdb-path",
+        metavar="PATH",
+        default=None,
+        help="DuckDB metadata file (overrides config)",
+    )
+
+    config = p.add_argument_group(
+        "config options (use with 'config' command)",
+        description=(
+            "Valid keys: auto_start, device, duckdb_path, "
+            "faiss_index, idle_timeout, port"
+        ),
+    )
+    config.add_argument(
         "--show",
         dest="config_show",
         action="store_true",
-        help="Show current configuration (use with 'config')",
+        help="Show current configuration",
     )
-    p.add_argument(
+    config.add_argument(
         "--set",
         dest="config_set",
         nargs=2,
         metavar=("KEY", "VALUE"),
-        help="Set a config value (use with 'config')",
+        help="Set a config value (e.g. --set port 8000)",
     )
 
     return p
