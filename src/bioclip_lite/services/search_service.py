@@ -153,6 +153,9 @@ class SearchService:
         for row in rows:
             d = dict(zip(col_names, row))
             if self._url_prefixes and "url_prefix_id" in d:
+                # Prefixes are domains (e.g. "https://content.eol.org"),
+                # suffixes always start with "/" (e.g. "/data/media/...").
+                # Split is guaranteed by optimize_duckdb.py's substr().
                 prefix = self._url_prefixes.get(d.pop("url_prefix_id"), "")
                 suffix = d.pop("identifier_suffix", "") or ""
                 d["identifier"] = prefix + suffix if (prefix or suffix) else None

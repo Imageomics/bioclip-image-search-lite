@@ -140,7 +140,7 @@ imageomics/bioclip-image-search-lite/
 | `source_dataset` | `data_source` | Renamed |
 | `identifier` | `source_url` | Renamed |
 | `has_url` | — | Derived; materialized boolean |
-| `in_bioclip2_training` | — | Derived; matched against [training catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12) |
+| `in_bioclip2_training` | — | Derived; matched against [training catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/a8f38b4388579862c56ae57d6f094c2ac0e92e12/dataset/catalog.parquet) |
 | All others | Same name | Direct mapping |
 
 **Columns from TreeOfLife-200M catalog not included:** `scientific_name`, `basis_of_record`, `shard_filename`, `shard_file_path`, `base_dataset_file_path`, `resolution_status`.
