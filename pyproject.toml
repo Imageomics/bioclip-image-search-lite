@@ -28,3 +28,6 @@ dev = ["pytest", "black", "isort"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bioclip_lite"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/bioclip_lite"]
