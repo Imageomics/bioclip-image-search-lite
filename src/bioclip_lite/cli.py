@@ -8,6 +8,7 @@ Usage:
     bioclip-search photo.jpg
     bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table
     bioclip-search photo.jpg --format csv --output results.csv
+    bioclip-search photo.jpg --local
     bioclip-search serve
     bioclip-search stop
     bioclip-search status

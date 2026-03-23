@@ -190,7 +190,7 @@ $ bioclip-search photo.jpg
 $ bioclip-search photo.jpg --format table --top-n 5
 
 Rank  Distance  Species                    Common Name           Family           Source  Occurrence                                     URL
-────  ────────  ─────────────────────────  ────────────────────  ───────────────  ──────  ─────────────────────────────────────────────  ───────────────────────────────────
+----  --------  -------------------------  --------------------  ---------------  ------  ---------------------------------------------  -----------------------------------
 1     0.0423    Danaus plexippus           Monarch Butterfly     Nymphalidae      gbif    https://www.gbif.org/occurrence/4012345678     https://inaturalist-open-da...
 2     0.0587    Danaus chrysippus          Plain Tiger           Nymphalidae      gbif    https://www.gbif.org/occurrence/4018765432     https://inaturalist-open-da...
 3     0.0612    Danaus gilippus            Queen Butterfly       Nymphalidae      gbif    https://www.gbif.org/occurrence/4019988776     https://inaturalist-open-da...
@@ -282,41 +282,51 @@ CUDA without any configuration.
 ```
 usage: bioclip-search [-h] [--top-n N]
                       [--scope {all,url_only,inaturalist,bioclip2_training}]
-                      [--nprobe N] [--format {json,table,csv}]
-                      [--output PATH] [--device {cpu,cuda,mps}]
-                      [--faiss-index PATH] [--duckdb-path PATH]
-                      [--local] [--show] [--set KEY VALUE]
+                      [--nprobe N] [--format {json,table,csv}] [--output PATH]
+                      [--local] [--device {cpu,cuda,mps}] [--faiss-index PATH]
+                      [--duckdb-path PATH] [--show] [--set KEY VALUE]
                       image
 
 Search 234M biological images using BioCLIP 2 embeddings.
 
 positional arguments:
-  image                 Path to query image, or a command:
-                          "serve"  - start search server in foreground
-                          "stop"   - stop running server
-                          "status" - show server status
-                          "config" - manage settings (use with --show/--set)
+  image                 Path to query image, or a command: "config" (manage
+                        settings), "serve" (start server in foreground),
+                        "stop" (stop server), "status" (server status).
 
 search options:
   --top-n N             Number of results to return (default: 10)
-  --scope SCOPE         Filter result scope (default: all)
-                          all               - All 234M images
-                          url_only          - Images with accessible URLs
-                          inaturalist       - iNaturalist images only (135M)
-                          bioclip2_training - BioCLIP 2 training set (206M)
+  --scope {all,url_only,inaturalist,bioclip2_training}
+                        Filter result scope (default: all)
   --nprobe N            FAISS search depth, higher=slower+better (default: 16)
-  --format {json,table,csv}  Output format (default: json)
-  --output PATH         Output file path; use "-" for stdout
-  --local               Skip server, load everything in-process
+  --format {json,table,csv}
+                        Output format (default: json)
+  --output PATH         Output file path; use "-" for stdout (default: stdout)
+  --local               Run search locally (skip server, load everything in-
+                        process)
 
-data options:
-  --device {cpu,cuda,mps}  Compute device (default: auto-detect CUDA > MPS > CPU)
-  --faiss-index PATH       FAISS index file (overrides config)
-  --duckdb-path PATH       DuckDB metadata file (overrides config)
+server/data options (search, serve):
+  --device {cpu,cuda,mps}
+                        Compute device (default: auto-detect CUDA > MPS > CPU)
+  --faiss-index PATH    FAISS index file (overrides config)
+  --duckdb-path PATH    DuckDB metadata file (overrides config)
 
-config options:
+config options (use with 'config' command):
+  Valid keys: auto_start, device, duckdb_path, faiss_index, idle_timeout, port
+
   --show                Show current configuration
-  --set KEY VALUE       Set a persistent config value
+  --set KEY VALUE       Set a config value (e.g. --set port 8000)
+
+examples:
+  bioclip-search photo.jpg                          # search (auto-starts server)
+  bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table
+  bioclip-search photo.jpg --format csv --output results.csv
+  bioclip-search photo.jpg --local                  # one-off search, no server
+  bioclip-search serve                              # start server in foreground
+  bioclip-search status                             # show server info
+  bioclip-search stop                               # stop the server
+  bioclip-search config --show                      # show current settings
+  bioclip-search config --set device cuda           # set a config value
 ```
 
 ## Output Fields
