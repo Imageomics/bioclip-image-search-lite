@@ -46,7 +46,7 @@ The trick: instead of storing images locally, we serve them directly from their 
 ## How it works
 
 ```
-Upload image → BioCLIP-2 embedding → FAISS search (200M vectors) → DuckDB metadata → Fetch from source URLs
+Upload image → BioCLIP 2 embedding → FAISS search (200M vectors) → DuckDB metadata → Fetch from source URLs
 ```
 
 Everything runs in a single Gradio process. No microservices, no HDF5 files.
@@ -58,7 +58,7 @@ Everything runs in a single Gradio process. No microservices, no HDF5 files.
 | Model weights | ~2.5 GB (downloaded on first run) |
 | Image storage | 0 (fetched from source URLs) |
 
-## Quick start
+## Setup
 
 ### Environment setup
 
@@ -67,19 +67,40 @@ Everything runs in a single Gradio process. No microservices, no HDF5 files.
 uv venv /path/to/venv --python 3.10
 source /path/to/venv/bin/activate
 
-# Install PyTorch CPU and dependencies
+# Install PyTorch (CPU or CUDA)
 uv pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
-uv pip install faiss-cpu duckdb pybioclip gradio Pillow requests
+# or for GPU: uv pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Install the package (registers the bioclip-search CLI command)
+uv pip install -e .
 ```
 
-### Data preparation
+### Data files
 
-The app needs two data files:
+Both the web UI and CLI need two data files:
 
-1. **FAISS index** — the pre-built 200M vector index
-2. **DuckDB metadata** — taxonomy + source URLs for all 234M images
+| File | Size | Description |
+|------|------|-------------|
+| FAISS index | ~5.8 GB | Pre-built 200M BioCLIP 2 vector index |
+| DuckDB metadata | ~14 GB | Taxonomy + source URLs for all 234M images |
 
-If you need to build the DuckDB from the upstream SQLite:
+**Option A: Automatic download.** The CLI will prompt to download these on
+first run to `~/.bioclip-search/data/`. The web app also auto-downloads from
+HuggingFace if paths are not provided.
+
+**Option B: Manual paths.** Point to existing files:
+
+```bash
+# For CLI (saved for future runs)
+bioclip-search config --set faiss_index /path/to/index.index
+bioclip-search config --set duckdb_path /path/to/metadata.duckdb
+
+# For web app (passed as flags each time)
+python app.py --faiss-index /path/to/index.index --duckdb-path /path/to/metadata.duckdb
+```
+
+**Option C: Build from upstream.** If you need to rebuild the DuckDB from the
+upstream SQLite or existing DuckDB:
 
 ```bash
 python scripts/data/convert_duckdb_lite.py \
@@ -88,6 +109,56 @@ python scripts/data/convert_duckdb_lite.py \
 ```
 
 Or submit as a SLURM job: `sbatch scripts/data/convert_duckdb_lite.slurm`
+
+## CLI: `bioclip-search`
+
+A pipe-friendly command-line interface for searching the 234M image dataset.
+See [docs/cli-design.md](docs/cli-design.md) for the full specification.
+
+### Quick start
+
+```bash
+# First search — auto-downloads data (if needed) and starts background server
+bioclip-search photo.jpg
+
+# Subsequent searches are fast (server stays warm)
+bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table
+bioclip-search photo.jpg --format csv --output results.csv
+```
+
+### Output formats
+
+- **JSON** (default) — structured output for scripting and piping
+- **Table** — human-readable terminal output
+- **CSV** — for spreadsheets and downstream analysis
+
+### Server architecture
+
+The CLI uses a background server to keep the model, FAISS index, and DuckDB
+loaded in memory. This avoids the ~30s startup cost on every search.
+
+```bash
+bioclip-search status             # check if server is running
+bioclip-search stop               # shut down server
+bioclip-search serve              # start server in foreground (for debugging)
+bioclip-search photo.jpg --local  # bypass server for one-off searches
+```
+
+The server auto-starts on first search (configurable) and auto-shuts down after
+30 minutes of inactivity (configurable).
+
+### Configuration
+
+Persistent settings are stored in `~/.bioclip-search/config.json`:
+
+```bash
+bioclip-search config --show
+bioclip-search config --set device cuda
+bioclip-search config --set idle_timeout 60    # minutes
+bioclip-search config --set auto_start false
+```
+
+## Web UI
 
 ### Run
 
@@ -126,7 +197,7 @@ Scope filters (`has_url`, `in_bioclip2_training`, etc.) are applied in Python af
 src/bioclip_lite/
   config.py              # Configuration and CLI args
   services/
-    model_service.py     # BioCLIP-2 embed + predict
+    model_service.py     # BioCLIP 2 embed + predict
     search_service.py    # FAISS vector search + DuckDB metadata
     image_service.py     # URL fetching with rate limiting
 app.py                   # Gradio frontend
@@ -182,4 +253,4 @@ Resources: 16 CPUs, 48 GB RAM, single process. The FAISS index and DuckDB are me
 
 - [bioclip-vector-db](https://github.com/Imageomics/bioclip-vector-db) — Full system with HDF5 image storage
 - [pybioclip](https://github.com/Imageomics/pybioclip) — BioCLIP Python client
-- [BioCLIP-2](https://huggingface.co/imageomics/bioclip-2) — The underlying vision model
+- [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) — The underlying vision model
