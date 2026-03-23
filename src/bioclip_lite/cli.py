@@ -445,6 +445,8 @@ def run_search(args: argparse.Namespace) -> None:
     # Try server first
     info = _get_server_info()
     if info:
+        scope_desc = SCOPE_DESCRIPTIONS.get(args.scope, args.scope)
+        _eprint(f"Searching {scope_desc}...")
         results = _search_via_server(info["port"], image_path, args)
         if results is not None:
             _output_results(results, args)
@@ -456,6 +458,8 @@ def run_search(args: argparse.Namespace) -> None:
 
     if auto_start:
         port = _auto_start_server(args.faiss_index, args.duckdb_path)
+        scope_desc = SCOPE_DESCRIPTIONS.get(args.scope, args.scope)
+        _eprint(f"Searching {scope_desc}...")
         results = _search_via_server(port, image_path, args)
         if results is not None:
             _output_results(results, args)
