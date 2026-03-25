@@ -2,7 +2,7 @@
 license: cc0-1.0
 language:
 - en
-pretty_name: BioCLIP Image Search Lite
+pretty_name: BioCLIP Image Search Lite FAISS Index
 task_categories:
 - image-feature-extraction
 tags:
@@ -55,7 +55,7 @@ The **FAISS index** enables sub-second approximate nearest-neighbor search over 
 
 ### Dataset Description
 
-- **Curated by:** Net Zhang, Sreejith Menon, Elizabeth Campolongo, Matthew Thompson, Arnab Nandi, Hilmar Lapp, Jianyang Gu <!-- TODO: confirm full author list -->
+- **Curated by:** Net Zhang, Sreejith Menon, Elizabeth Campolongo, Matthew Thompson, Arnab Nandi, Hilmar Lapp, Jianyang Gu
 - **Demo:** [BioCLIP Image Search Lite Space](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite)
 - **Repository:** [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite)
 - **Paper:** [BioCLIP 2: Emergent Properties from Scaling Hierarchical Contrastive Learning](https://arxiv.org/abs/2505.23883)
@@ -88,7 +88,7 @@ imageomics/bioclip-image-search-lite/
     faiss/
         index.index          # FAISS IVF+PQ index (~5.8 GB, ~200M vectors)
     duckdb/
-        metadata.duckdb      # DuckDB metadata database (~27 GB, 234M rows)
+        metadata.duckdb      # DuckDB metadata database (~14 GB optimized, 234M rows)
 ```
 
 ### FAISS Index
@@ -127,8 +127,48 @@ imageomics/bioclip-image-search-lite/
 | `source_id` | `VARCHAR` | Unique identifier from source (e.g., GBIF `gbifID`, EOL content/page ID). |
 | `publisher` | `VARCHAR` | Organization that published the data (GBIF records only, e.g., `iNaturalist`). |
 | `img_type` | `VARCHAR` | Image type (e.g., `Citizen Science`, `Museum Specimen: Fungi`, `Camera-trap`). GBIF only; others are `Unidentified`. |
-| `identifier` | `VARCHAR` | URL to the original image, or `NULL` if unavailable. Corresponds to `source_url` in TreeOfLife-200M catalog. |
-| `has_url` | `BOOLEAN` | Materialized flag: `TRUE` if `identifier` is not null/empty. Used for scope filtering. |
+| `url_prefix_id` | `USMALLINT` | Foreign key into the `url_prefixes` lookup table. Together with `identifier_suffix`, reconstructs the full image URL as `<prefix><suffix>`. See [URL reconstruction](#url-reconstruction) below. |
+| `identifier_suffix` | `VARCHAR` | Path portion of the image URL (always starts with `/`, e.g., `/photos/12345/original.jpg`). `NULL` if no URL is available. |
+| `has_url` | `BOOLEAN` | Materialized flag: `TRUE` if a URL is available. Used for scope filtering. |
+| `in_bioclip2_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2 training data — TreeOfLife-200M (Revision [a8f38b4](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12)). |
+
+**Table:** `url_prefixes` — 411 rows
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `prefix_id` | `USMALLINT` | Primary key. |
+| `prefix` | `VARCHAR` | URL domain prefix (e.g., `https://inaturalist-open-data.s3.amazonaws.com`). Does not include a trailing `/`. |
+
+#### URL reconstruction
+
+The original `identifier` (full image URL) column from TreeOfLife-200M is split into a shared domain prefix and a per-row path suffix to reduce storage overhead. To reconstruct the full URL:
+
+```sql
+SELECT p.prefix || m.identifier_suffix AS url
+FROM metadata m
+JOIN url_prefixes p ON m.url_prefix_id = p.prefix_id
+WHERE m.identifier_suffix IS NOT NULL
+```
+
+```python
+import duckdb
+
+conn = duckdb.connect("metadata.duckdb", read_only=True)
+
+# Load prefix lookup table into a dict
+prefixes = dict(conn.execute("SELECT prefix_id, prefix FROM url_prefixes").fetchall())
+
+# Query metadata and reconstruct URLs
+rows = conn.execute("SELECT url_prefix_id, identifier_suffix FROM metadata LIMIT 5").fetchall()
+for prefix_id, suffix in rows:
+    url = prefixes.get(prefix_id, "") + (suffix or "")
+    print(url)
+# https://inaturalist-open-data.s3.amazonaws.com/photos/12345/original.jpg
+# https://content.eol.org/data/media/17/a6/537.jpg
+# ...
+```
+
+Prefixes are bare domains (e.g., `https://content.eol.org`) and suffixes always start with `/` (e.g., `/data/media/17/a6/537.jpg`), so simple concatenation produces a valid URL. This split saves ~40% storage compared to storing the full URL per row.
 
 **Column name mapping from [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) catalog:**
 
@@ -137,8 +177,10 @@ imageomics/bioclip-image-search-lite/
 | `id` | — | New; FAISS vector position index |
 | `common_name` | `common` | Renamed |
 | `source_dataset` | `data_source` | Renamed |
-| `identifier` | `source_url` | Renamed |
+| `url_prefix_id` | `source_url` | Split from `source_url`; foreign key to `url_prefixes` |
+| `identifier_suffix` | `source_url` | Split from `source_url`; path portion of URL |
 | `has_url` | — | Derived; materialized boolean |
+| `in_bioclip2_training` | — | Derived; matched against [training catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/a8f38b4388579862c56ae57d6f094c2ac0e92e12/dataset/catalog.parquet) |
 | All others | Same name | Direct mapping |
 
 **Columns from TreeOfLife-200M catalog not included:** `scientific_name`, `basis_of_record`, `shard_filename`, `shard_file_path`, `base_dataset_file_path`, `resolution_status`.
@@ -147,16 +189,19 @@ For more background on these columns, please see the [data field descriptions fr
 
 **Indexes:**
 - `idx_id` on `id` (primary lookup for FAISS result mapping)
-- `idx_scope` on `(source_dataset, has_url)` (scope filtering)
+- `idx_scope` on `(source_dataset, has_url, in_bioclip2_training)` (scope filtering)
 
 **Data coverage:**
 
 | Scope | Count | Percentage |
 |-------|-------|------------|
 | Total rows | 234,391,308 | 100% |
-| With URL (`has_url = TRUE`) | ~207M | 88.4% |
-| iNaturalist (`source_dataset = 'gbif' AND publisher = 'iNaturalist'`) | ~136M | 58% |
-| Without URL | ~27M | 11.6% |
+| With URL (`has_url = TRUE`) | ~234M | 99.99% |
+| iNaturalist (`source_dataset = 'gbif' AND publisher LIKE '%iNaturalist%'`) | ~136M | 58% |
+| In BioCLIP 2 training (`in_bioclip2_training = TRUE`) | ~206M | 87.9% |
+| With taxonomy (`kingdom IS NOT NULL`) | ~228M | 97.2% |
+
+> **Note on `in_bioclip2_training`:** This column identifies records whose UUID matches the BioCLIP 2 training catalog from [TreeOfLife-200M revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12). The original BioCLIP 2 training set contained ~214M images. Of these, ~206M match records in the search corpus. The remaining ~8M were excluded from the FAISS index because they were identified as invalid after training (e.g., document scans, specimen labels, images with detected human faces) and removed during a post-training data cleanup before the embeddings were generated.
 
 ### Data Splits
 
@@ -252,7 +297,7 @@ for _, row in results.iterrows():
 The full [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) stores 234M images totaling ~92 TB — far too large for lightweight deployment. [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) was created to make the similarity search capability accessible on constrained infrastructure (e.g., Hugging Face Spaces free tier: 2 vCPU, 16 GB RAM, 50 GB disk) by:
 
 1. Replacing local image storage with on-demand URL fetching from publicly accessible external sources (primarily [iNaturalist AWS Open Data](https://github.com/inaturalist/inaturalist-open-data) S3).
-2. Compressing the metadata from an 80 GB SQLite database to a ~27 GB DuckDB database (optimized via columnar storage and compression).
+2. Compressing the metadata from an 80 GB SQLite database to a ~14 GB DuckDB database (optimized via ENUM types, URL prefix deduplication, taxonomy sorting, and columnar compression).
 3. Packaging the FAISS index (~5.8 GB) and DuckDB metadata as the only deployment artifacts.
 
 This approach trades occasional missing thumbnails (when source URLs are unavailable) for a >1000x reduction in storage requirements. See [Imageomics/bioclip-vector-db#47](https://github.com/Imageomics/bioclip-vector-db/issues/47#issuecomment-3927846723) for the full design rationale.
@@ -269,7 +314,7 @@ These URLs are **reasonably persistent but not guaranteed stable**:
 - **AWS sponsorship is renewable.** The AWS Open Data Sponsorship runs on a [2-year renewable term](https://aws.amazon.com/opendata/open-data-sponsorship-program/terms/) with no uptime SLA.
 - **No explicit S3 rate limit.** The iNaturalist [API Recommended Practices](https://www.inaturalist.org/pages/api+recommended+practices) recommend <5 GB/hour and <24 GB/day for media downloads, though it is unclear whether this applies to direct S3 access. The [BioCLIP Image Search Lite application](https://github.com/Imageomics/bioclip-image-search-lite) respects these limits regardless.
 
-The remaining URLs point to other biodiversity platforms ([EOL](https://eol.org/), [BIOSCAN-5M](https://biodiversitygenomics.net/projects/5m-insects/), [FathomNet](https://www.fathomnet.org/)), each with their own availability characteristics. The ~11.6% of records without any URL are still searchable via the FAISS index but cannot display a source image.
+The remaining URLs point to other biodiversity platforms ([EOL](https://eol.org/), [BIOSCAN-5M](https://biodiversitygenomics.net/projects/5m-insects/), [FathomNet](https://www.fathomnet.org/)), each with their own availability characteristics.
 
 ### Source Data
 
@@ -297,9 +342,12 @@ The DuckDB metadata database was assembled from two sources produced by the [Bio
 
 The Lite repo merged these into a single DuckDB database ([`convert_duckdb_lite.py`](https://github.com/Imageomics/bioclip-image-search-lite/blob/main/scripts/data/convert_duckdb_lite.py)) with the following optimizations:
 
-- Added a materialized `has_url` boolean column for efficient scope filtering.
-- Created indexes: `idx_id` on `id` (primary FAISS lookup) and `idx_scope` on `(source_dataset, has_url)` (scope filtering).
-- Leveraged DuckDB's columnar storage and compression, reducing the database from ~80 GB (SQLite) to ~27 GB.
+- Added materialized boolean columns `has_url` and `in_bioclip2_training` for scope filtering.
+- Created indexes: `idx_id` on `id` (primary FAISS lookup) and `idx_scope` on `(source_dataset, has_url, in_bioclip2_training)`.
+- Applied ENUM types for low-cardinality columns, URL prefix deduplication, and taxonomy-based row sorting for better compression.
+- Leveraged DuckDB's columnar storage and compression, reducing the database from ~80 GB (SQLite) to ~14 GB.
+
+**Metadata backfill (March 2026):** 28.3M rows (12.1%) originally had NULL metadata because the entire `observation.org` GBIF server (27.2M rows) was missing from the metadata parquets used during ingestion. Taxonomy was recovered for ~21.7M rows from the resolved taxa pipeline, and source URLs were recovered for all 27.2M rows from the GBIF data parquets. An additional 1.1M EOL rows with failed taxonomy resolution had their `source_dataset` and `source_id` recovered. UUIDs were also normalized from mixed formats (non-hyphenated for observation.org rows) to a consistent hyphenated format. After backfill, only 2,973 rows remain with NULL `source_dataset`.
 
 #### Source Data Producers
 
@@ -322,8 +370,8 @@ This dataset does not include annotations created specifically for this reposito
 This dataset inherits biases and considerations from [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#considerations-for-using-the-data). The following are exaggerated in this instance (BioCLIP Image Search Lite) due to available image representation (those readily fetched by URL):
 
 - **Taxonomic coverage is uneven.** Despite including 952K+ unique taxa, coverage is heavily biased toward well-photographed organisms. Citizen science observations (primarily iNaturalist) comprise ~58% of the data, skewing representation toward charismatic species and regions where citizen science is most active (Western/developed countries).
-- **Incomplete taxonomic labels.** As inherited from TreeOfLife-200M, only ~89% of records have full species-level taxonomy. ~11% lack complete labels due to biodiversity data complexities (`NULL` values at lower ranks).
-- **URL availability is not guaranteed.** ~11.6% of records have no source URL. For records with URLs, images may become unavailable over time due to URL rot, server changes, or content removal.
+- **Incomplete taxonomic labels.** As inherited from TreeOfLife-200M, ~97% of records now have kingdom-level taxonomy after the March 2026 backfill. The remaining ~3% lack complete labels due to biodiversity data complexities (`NULL` values at lower ranks).
+- **URL availability is not guaranteed.** After the metadata backfill, nearly all records (99.99%) have source URLs, though images may become unavailable over time due to URL rot, server changes, or content removal.
 - **FAISS approximation.** The IVF+PQ index trades exactness for speed. Results are approximate nearest neighbors — some true nearest neighbors may be missed depending on the `nprobe` setting. Higher `nprobe` values improve recall at the cost of latency.
 - **Embedding bias.** Similarity is determined by BioCLIP 2 embeddings, which may encode biases from the training data.
 
@@ -346,7 +394,6 @@ We ask that you cite this dataset and associated papers if you make use of it in
 
 ## Citation
 
-<!-- TODO: confirm full author list and add DOI once generated -->
 **Data:**
 ```bibtex
 @misc{zhang2026biocliplite,

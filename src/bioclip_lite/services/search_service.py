@@ -19,6 +19,7 @@ SCOPE_MAP = {
     "All Sources": "all",
     "URL-Available Only": "url_only",
     "iNaturalist Only": "inaturalist",
+    "BioCLIP 2 Training": "bioclip2_training",
 }
 
 
@@ -62,6 +63,10 @@ class SearchService:
         row_count = self.conn.execute("SELECT COUNT(*) FROM metadata").fetchone()[0]
         logger.info(f"DuckDB connected: {row_count:,} rows")
 
+        # Load URL prefix lookup (410 entries, ~50 KB in memory).
+        # Reconstructs full URLs in Python instead of a SQL JOIN.
+        self._url_prefixes = self._load_url_prefixes()
+
     @_timer
     def search(
         self,
@@ -76,7 +81,7 @@ class SearchService:
             query_vector: 1-D embedding vector (768-dim for BioCLIP-2).
             top_n: Number of results to return after scope filtering.
             nprobe: Number of IVF partitions to search.
-            scope: "all", "url_only", or "inaturalist".
+            scope: "all", "url_only", "inaturalist", or "bioclip2_training".
 
         Returns:
             List of result dicts ordered by distance, each containing
@@ -126,28 +131,34 @@ class SearchService:
         distances: List[float],
         scope: str,
     ) -> List[Dict[str, Any]]:
-        """Query DuckDB for metadata, applying scope filter."""
-        id_list = ",".join(str(i) for i in ids)
+        """Query DuckDB for metadata, filtering by scope in Python.
 
-        where = [f"id IN ({id_list})"]
-        if scope == "url_only":
-            where.append("has_url = true")
-        elif scope == "inaturalist":
-            where.append("has_url = true")
-            where.append("source_dataset = 'gbif'")
-            where.append("publisher LIKE '%iNaturalist%'")
+        Scope filtering via SQL WHERE clauses causes ~370x slowdown on
+        ID-based lookups (4ms → 1600ms) because DuckDB scans the full
+        column even when nearly all rows match. Since has_url and
+        in_bioclip2_training are true for >87% of rows, post-filtering
+        in Python is far more efficient.
+        """
+        id_list = ",".join(str(i) for i in ids)
 
         query = (
             f"SELECT {self.metadata_columns} FROM metadata "
-            f"WHERE {' AND '.join(where)}"
+            f"WHERE id IN ({id_list})"
         )
         rows = self.conn.execute(query).fetchall()
         col_names = [desc[0] for desc in self.conn.description]
 
-        # Build lookup keyed by id
+        # Build lookup keyed by id, reconstructing full URL from prefix + suffix
         meta_map: Dict[int, Dict] = {}
         for row in rows:
             d = dict(zip(col_names, row))
+            if self._url_prefixes and "url_prefix_id" in d:
+                # Prefixes are domains (e.g. "https://content.eol.org"),
+                # suffixes always start with "/" (e.g. "/data/media/...").
+                # Split is guaranteed by optimize_duckdb.py's substr().
+                prefix = self._url_prefixes.get(d.pop("url_prefix_id"), "")
+                suffix = d.pop("identifier_suffix", "") or ""
+                d["identifier"] = prefix + suffix if (prefix or suffix) else None
             meta_map[d["id"]] = d
 
         # Merge with distances, preserving FAISS ranking
@@ -155,6 +166,20 @@ class SearchService:
         for fid, dist in zip(ids, distances):
             if fid in meta_map:
                 results.append({"distance": dist, **meta_map[fid]})
+
+        # Apply scope filter in Python (much faster than SQL WHERE)
+        if scope == "url_only":
+            results = [r for r in results if r.get("has_url")]
+        elif scope == "inaturalist":
+            results = [
+                r for r in results
+                if r.get("has_url")
+                and r.get("source_dataset") == "gbif"
+                and "iNaturalist" in (r.get("publisher") or "")
+            ]
+        elif scope == "bioclip2_training":
+            results = [r for r in results if r.get("in_bioclip2_training")]
+
         return results
 
     @property
@@ -164,6 +189,20 @@ class SearchService:
     @property
     def total_vectors(self) -> int:
         return self.index.ntotal
+
+    def _load_url_prefixes(self) -> Dict[int, str]:
+        """Load url_prefixes table into a dict for fast in-Python URL reconstruction."""
+        try:
+            rows = self.conn.execute(
+                "SELECT prefix_id, prefix FROM url_prefixes"
+            ).fetchall()
+            prefixes = {row[0]: row[1] for row in rows}
+            logger.info(f"Loaded {len(prefixes)} URL prefixes")
+            return prefixes
+        except duckdb.CatalogException:
+            # Legacy DB without url_prefixes table — identifier is a direct column
+            logger.info("No url_prefixes table found, using direct identifier column")
+            return {}
 
     def close(self):
         self.conn.close()
