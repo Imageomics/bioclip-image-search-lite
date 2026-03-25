@@ -127,9 +127,48 @@ imageomics/bioclip-image-search-lite/
 | `source_id` | `VARCHAR` | Unique identifier from source (e.g., GBIF `gbifID`, EOL content/page ID). |
 | `publisher` | `VARCHAR` | Organization that published the data (GBIF records only, e.g., `iNaturalist`). |
 | `img_type` | `VARCHAR` | Image type (e.g., `Citizen Science`, `Museum Specimen: Fungi`, `Camera-trap`). GBIF only; others are `Unidentified`. |
-| `identifier` | `VARCHAR` | URL to the original image, or `NULL` if unavailable. Corresponds to `source_url` in TreeOfLife-200M catalog. |
-| `has_url` | `BOOLEAN` | Materialized flag: `TRUE` if `identifier` is not null/empty. Used for scope filtering. |
-| `in_bioclip2_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2 training data -  TreeOfLife-200M (Revision [a8f38b4](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12)). |
+| `url_prefix_id` | `USMALLINT` | Foreign key into the `url_prefixes` lookup table. Together with `identifier_suffix`, reconstructs the full image URL as `prefix || suffix`. See [URL reconstruction](#url-reconstruction) below. |
+| `identifier_suffix` | `VARCHAR` | Path portion of the image URL (always starts with `/`, e.g., `/photos/12345/original.jpg`). `NULL` if no URL is available. |
+| `has_url` | `BOOLEAN` | Materialized flag: `TRUE` if a URL is available. Used for scope filtering. |
+| `in_bioclip2_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2 training data — TreeOfLife-200M (Revision [a8f38b4](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12)). |
+
+**Table:** `url_prefixes` — 411 rows
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `prefix_id` | `USMALLINT` | Primary key. |
+| `prefix` | `VARCHAR` | URL domain prefix (e.g., `https://inaturalist-open-data.s3.amazonaws.com`). Does not include a trailing `/`. |
+
+#### URL reconstruction
+
+The original `identifier` (full image URL) column from TreeOfLife-200M is split into a shared domain prefix and a per-row path suffix to reduce storage. To reconstruct the full URL:
+
+```sql
+SELECT p.prefix || m.identifier_suffix AS url
+FROM metadata m
+JOIN url_prefixes p ON m.url_prefix_id = p.prefix_id
+WHERE m.identifier_suffix IS NOT NULL
+```
+
+```python
+import duckdb
+
+conn = duckdb.connect("metadata.duckdb", read_only=True)
+
+# Load prefix lookup table into a dict
+prefixes = dict(conn.execute("SELECT prefix_id, prefix FROM url_prefixes").fetchall())
+
+# Query metadata and reconstruct URLs
+rows = conn.execute("SELECT url_prefix_id, identifier_suffix FROM metadata LIMIT 5").fetchall()
+for prefix_id, suffix in rows:
+    url = prefixes.get(prefix_id, "") + (suffix or "")
+    print(url)
+# https://inaturalist-open-data.s3.amazonaws.com/photos/12345/original.jpg
+# https://content.eol.org/data/media/17/a6/537.jpg
+# ...
+```
+
+Prefixes are bare domains (e.g., `https://content.eol.org`) and suffixes always start with `/` (e.g., `/data/media/17/a6/537.jpg`), so simple concatenation produces a valid URL. This split saves ~40% storage compared to storing the full URL per row.
 
 **Column name mapping from [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) catalog:**
 
@@ -138,7 +177,8 @@ imageomics/bioclip-image-search-lite/
 | `id` | — | New; FAISS vector position index |
 | `common_name` | `common` | Renamed |
 | `source_dataset` | `data_source` | Renamed |
-| `identifier` | `source_url` | Renamed |
+| `url_prefix_id` | `source_url` | Split from `source_url`; foreign key to `url_prefixes` |
+| `identifier_suffix` | `source_url` | Split from `source_url`; path portion of URL |
 | `has_url` | — | Derived; materialized boolean |
 | `in_bioclip2_training` | — | Derived; matched against [training catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/a8f38b4388579862c56ae57d6f094c2ac0e92e12/dataset/catalog.parquet) |
 | All others | Same name | Direct mapping |
