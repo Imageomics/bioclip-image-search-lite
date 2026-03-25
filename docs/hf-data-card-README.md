@@ -55,7 +55,7 @@ The **FAISS index** enables sub-second approximate nearest-neighbor search over 
 
 ### Dataset Description
 
-- **Curated by:** Net Zhang, Sreejith Menon, Elizabeth Campolongo, Matthew Thompson, Arnab Nandi, Hilmar Lapp, Jianyang Gu <!-- TODO: confirm full author list -->
+- **Curated by:** Net Zhang, Sreejith Menon, Elizabeth Campolongo, Matthew Thompson, Arnab Nandi, Hilmar Lapp, Jianyang Gu
 - **Demo:** [BioCLIP Image Search Lite Space](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite)
 - **Repository:** [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite)
 - **Paper:** [BioCLIP 2: Emergent Properties from Scaling Hierarchical Contrastive Learning](https://arxiv.org/abs/2505.23883)
@@ -394,7 +394,6 @@ We ask that you cite this dataset and associated papers if you make use of it in
 
 ## Citation
 
-<!-- TODO: confirm full author list and add DOI once generated -->
 **Data:**
 ```bibtex
 @misc{zhang2026biocliplite,
