@@ -127,7 +127,7 @@ imageomics/bioclip-image-search-lite/
 | `source_id` | `VARCHAR` | Unique identifier from source (e.g., GBIF `gbifID`, EOL content/page ID). |
 | `publisher` | `VARCHAR` | Organization that published the data (GBIF records only, e.g., `iNaturalist`). |
 | `img_type` | `VARCHAR` | Image type (e.g., `Citizen Science`, `Museum Specimen: Fungi`, `Camera-trap`). GBIF only; others are `Unidentified`. |
-| `url_prefix_id` | `USMALLINT` | Foreign key into the `url_prefixes` lookup table. Together with `identifier_suffix`, reconstructs the full image URL as `prefix || suffix`. See [URL reconstruction](#url-reconstruction) below. |
+| `url_prefix_id` | `USMALLINT` | Foreign key into the `url_prefixes` lookup table. Together with `identifier_suffix`, reconstructs the full image URL as `<prefix><suffix>`. See [URL reconstruction](#url-reconstruction) below. |
 | `identifier_suffix` | `VARCHAR` | Path portion of the image URL (always starts with `/`, e.g., `/photos/12345/original.jpg`). `NULL` if no URL is available. |
 | `has_url` | `BOOLEAN` | Materialized flag: `TRUE` if a URL is available. Used for scope filtering. |
 | `in_bioclip2_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2 training data — TreeOfLife-200M (Revision [a8f38b4](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12)). |
@@ -141,7 +141,7 @@ imageomics/bioclip-image-search-lite/
 
 #### URL reconstruction
 
-The original `identifier` (full image URL) column from TreeOfLife-200M is split into a shared domain prefix and a per-row path suffix to reduce storage. To reconstruct the full URL:
+The original `identifier` (full image URL) column from TreeOfLife-200M is split into a shared domain prefix and a per-row path suffix to reduce storage overhead. To reconstruct the full URL:
 
 ```sql
 SELECT p.prefix || m.identifier_suffix AS url
