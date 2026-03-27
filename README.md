@@ -97,7 +97,7 @@ Schema, source, and curation details can be found in the [dataset card](https://
 
 > **Tip:** Authenticate with HuggingFace to avoid rate-limited downloads:
 > ```bash
-> huggingface-cli login
+> hf auth login
 > ```
 
 **Option A: Download via CLI.**
@@ -112,7 +112,7 @@ bioclip-search download --data-dir /path/to/dir
 **Option B: Download via HuggingFace CLI.**
 
 ```bash
-huggingface-cli download imageomics/bioclip-image-search-lite --local-dir ~/.bioclip-search/data/
+hf download imageomics/bioclip-image-search-lite --local-dir ~/.bioclip-search/data/
 ```
 
 **Option C: Point to existing files.**

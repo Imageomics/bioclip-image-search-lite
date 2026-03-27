@@ -517,7 +517,7 @@ def handle_check(args: argparse.Namespace) -> None:
             _eprint(f"  HF auth:   not authenticated")
             issues.append(
                 "HuggingFace not authenticated. Downloads may be rate-limited.\n"
-                "  Run: huggingface-cli login"
+                "  Run: hf auth login"
             )
     except ImportError:
         _eprint(f"  HF auth:   huggingface_hub not installed")
@@ -525,7 +525,7 @@ def handle_check(args: argparse.Namespace) -> None:
         _eprint(f"  HF auth:   not authenticated")
         issues.append(
             "HuggingFace not authenticated. Downloads may be rate-limited.\n"
-            "  Run: huggingface-cli login"
+            "  Run: hf auth login"
         )
 
     # -- Data --
