@@ -21,37 +21,73 @@ uv pip install bioclip-image-search-lite
 
 This registers the `bioclip-search` command.
 
-## First-Run Setup
+## Data Setup
 
-On first invocation, if data files are not found, the CLI prompts the user to
-download them:
+The CLI requires two data files hosted on HuggingFace:
+https://huggingface.co/imageomics/bioclip-image-search-lite
+
+| File | Size | Description |
+|------|------|-------------|
+| FAISS index | ~5.5 GB | 234M BioCLIP 2 vector embeddings for similarity search |
+| DuckDB metadata | ~14 GB | Taxonomy and source metadata for all 234M images |
+
+### Download command
+
+```bash
+# Download to default location (~/.bioclip-search/data/)
+$ bioclip-search download
+
+Source:      https://huggingface.co/imageomics/bioclip-image-search-lite
+Destination: /home/user/.bioclip-search/data
+
+Downloading FAISS index (faiss/index.index)...
+  Saved to /home/user/.bioclip-search/data/faiss/index.index
+
+Downloading DuckDB metadata (duckdb/metadata.duckdb)...
+  Saved to /home/user/.bioclip-search/data/duckdb/metadata.duckdb
+
+Download complete. Paths saved to config.
+  Config file: /home/user/.bioclip-search/config.json
+
+Verify with: bioclip-search config --show
+```
+
+```bash
+# Download to a custom location
+$ bioclip-search download --data-dir /scratch/shared/bioclip-data
+```
+
+### Using existing data files
+
+If you already have the data files, point to them directly:
+
+```bash
+bioclip-search config --set faiss_index /path/to/index.index
+bioclip-search config --set duckdb_path /path/to/metadata.duckdb
+```
+
+### What happens without data
+
+If data files are not found when searching, the CLI exits with a clear message:
 
 ```
 $ bioclip-search photo.jpg
 
-bioclip-search: data files not found.
+Error: data files not found (FAISS index, DuckDB metadata).
 
-The following files are required:
-  FAISS index     (~5.8 GB)  - 234M BioCLIP 2 image embeddings
-  DuckDB metadata  (~14 GB)  - taxonomy and source metadata
+Download the required data files first:
 
-Download to ~/.bioclip-search/data? [Y/n] y
+  bioclip-search download
 
-Downloading from huggingface.co/imageomics/bioclip-image-search-lite...
-  FAISS index:     [████████████████████████████] 5.8 GB / 5.8 GB  done
-  DuckDB metadata: [██████████████░░░░░░░░░░░░░░] 7.2 GB / 14 GB   51%  ETA 3m
+Or download to a custom location:
+
+  bioclip-search download --data-dir /path/to/dir
+
+Or point to existing files:
+
+  bioclip-search config --set faiss_index /path/to/index.index
+  bioclip-search config --set duckdb_path /path/to/metadata.duckdb
 ```
-
-After download, paths are saved to `~/.bioclip-search/config.json`:
-
-```json
-{
-  "faiss_index": "~/.bioclip-search/data/index.index",
-  "duckdb_path": "~/.bioclip-search/data/metadata.duckdb"
-}
-```
-
-Subsequent runs use the saved paths automatically.
 
 ### Data Path Resolution Order
 
@@ -60,12 +96,11 @@ Highest priority first:
 1. CLI flags (`--faiss-index`, `--duckdb-path`)
 2. Config file (`~/.bioclip-search/config.json`)
 3. Default data directory (`~/.bioclip-search/data/`)
-4. Auto-download prompt
 
 ## Server Architecture
 
 The CLI uses a local daemon to avoid reloading the model (~2.5 GB), FAISS index
-(~5.8 GB), and DuckDB metadata (~14 GB) on every invocation. The server keeps
+(~5.5 GB), and DuckDB metadata (~14 GB) on every invocation. The server keeps
 these loaded in memory and serves search requests over HTTP on `127.0.0.1`.
 
 ### Auto-start (default)
@@ -130,6 +165,13 @@ This loads everything in-process — slower startup but no background process.
 
 ## Usage
 
+### Data setup
+
+```bash
+bioclip-search download                       # download to default location
+bioclip-search download --data-dir /path      # download to custom location
+```
+
 ### Search (default action)
 
 The primary command. Takes an image path as a positional argument:
@@ -146,15 +188,42 @@ bioclip-search stop               # stop running server
 bioclip-search status             # show server status
 ```
 
+### Setup verification
+
+```bash
+$ bioclip-search check
+
+Environment:
+  Python:    3.10.13
+  Platform:  Linux 5.14.0
+  torch:     2.1.0+cu121
+  CUDA:      available (NVIDIA A100)
+
+Data:
+  FAISS index:  ~/.bioclip-search/data/faiss/index.index (5.4 GB)
+  DuckDB:       ~/.bioclip-search/data/duckdb/metadata.duckdb (14.3 GB)
+
+Server:
+  Status:  not running
+
+Config:  ~/.bioclip-search/config.json
+
+No issues found.
+```
+
+Reports Python version, torch build, GPU detection, data file status, and server
+state. Flags issues with suggested fixes (e.g., CUDA GPU detected but CPU-only
+torch installed).
+
 ### Config management
 
 ```bash
 bioclip-search config [--show | --set KEY VALUE]
 ```
 
-The positional argument distinguishes behavior: if it's a command (`config`,
-`serve`, `stop`, `status`), that action runs; otherwise it's treated as an
-image path for search.
+The positional argument distinguishes behavior: if it's a command (`download`,
+`check`, `config`, `serve`, `stop`, `status`), that action runs; otherwise it's
+treated as an image path for search.
 
 ## Search Examples
 
@@ -283,16 +352,21 @@ CUDA without any configuration.
 usage: bioclip-search [-h] [--top-n N]
                       [--scope {all,url_only,inaturalist,bioclip2_training}]
                       [--nprobe N] [--format {json,table,csv}] [--output PATH]
-                      [--local] [--device {cpu,cuda,mps}] [--faiss-index PATH]
-                      [--duckdb-path PATH] [--show] [--set KEY VALUE]
+                      [--local] [--data-dir PATH] [--device {cpu,cuda,mps}]
+                      [--faiss-index PATH] [--duckdb-path PATH]
+                      [--show] [--set KEY VALUE]
                       image
 
 Search 234M biological images using BioCLIP 2 embeddings.
 
 positional arguments:
-  image                 Path to query image, or a command: "config" (manage
-                        settings), "serve" (start server in foreground),
-                        "stop" (stop server), "status" (server status).
+  image                 Path to query image, or a command:
+                          "download" - fetch data files from HuggingFace
+                          "check"    - verify installation and setup
+                          "config"   - manage settings (use with --show/--set)
+                          "serve"    - start search server in foreground
+                          "stop"     - stop running server
+                          "status"   - show server status
 
 search options:
   --top-n N             Number of results to return (default: 10)
@@ -305,7 +379,8 @@ search options:
   --local               Run search locally (skip server, load everything in-
                         process)
 
-server/data options (search, serve):
+server/data options:
+  --data-dir PATH       Download destination directory (default: ~/.bioclip-search/data)
   --device {cpu,cuda,mps}
                         Compute device (default: auto-detect CUDA > MPS > CPU)
   --faiss-index PATH    FAISS index file (overrides config)
@@ -318,6 +393,9 @@ config options (use with 'config' command):
   --set KEY VALUE       Set a config value (e.g. --set port 8000)
 
 examples:
+  bioclip-search download                           # download data files
+  bioclip-search download --data-dir /shared/data   # download to custom path
+  bioclip-search check                              # verify installation
   bioclip-search photo.jpg                          # search (auto-starts server)
   bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table
   bioclip-search photo.jpg --format csv --output results.csv

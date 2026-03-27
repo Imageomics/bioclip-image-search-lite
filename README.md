@@ -53,42 +53,64 @@ Everything runs in a single Gradio process. No microservices, no HDF5 files.
 
 | Component | Size |
 |-----------|------|
-| FAISS index | 5.8 GB |
+| FAISS index | ~5.5 GB |
 | DuckDB metadata | ~14 GB (optimized) |
 | Model weights | ~2.5 GB (downloaded on first run) |
 | Image storage | 0 (fetched from source URLs) |
 
 ## Setup
 
-### Environment setup
+### Step 1: Install
+
+**Linux / macOS (CPU):**
 
 ```bash
-# Create venv with uv
-uv venv /path/to/venv --python 3.10
-source /path/to/venv/bin/activate
-
-# Install PyTorch (CPU or CUDA)
-uv pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
-# or for GPU: uv pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121
-
-# Install the package (registers the bioclip-search CLI command)
+uv venv .venv --python 3.10
+source .venv/bin/activate
+uv pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
 uv pip install -e .
 ```
 
-### Data files
+**Linux / Windows (GPU — CUDA 12.1):**
 
-Both the web UI and CLI need two data files:
+```bash
+uv venv .venv --python 3.10
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+uv pip install torch --extra-index-url https://download.pytorch.org/whl/cu121
+uv pip install -e .
+```
+
+> **Important:** Install torch with the correct CUDA version *before* `uv pip install -e .`.
+> If torch is already installed (CPU-only), reinstall it with the CUDA index URL above.
+
+### Step 2: Download data
+
+Both the web UI and CLI need two data files (~20 GB total), hosted on HuggingFace:
+[`imageomics/bioclip-image-search-lite`](https://huggingface.co/imageomics/bioclip-image-search-lite)
 
 | File | Size | Description |
 |------|------|-------------|
-| FAISS index | ~5.8 GB | Pre-built 200M BioCLIP 2 vector index |
+| FAISS index | ~5.5 GB | 234M BioCLIP 2 vector embeddings for similarity search |
 | DuckDB metadata | ~14 GB | Taxonomy + source URLs for all 234M images |
 
-**Option A: Automatic download.** The CLI will prompt to download these on
-first run to `~/.bioclip-search/data/`. The web app also auto-downloads from
-HuggingFace if paths are not provided.
+Schema, source, and curation details can be found in the [dataset card](https://huggingface.co/imageomics/bioclip-image-search-lite/blob/main/README.md).
 
-**Option B: Manual paths.** Point to existing files:
+**Option A: Download via CLI.**
+
+```bash
+bioclip-search download
+
+# Or to a custom location (e.g., shared HPC storage)
+bioclip-search download --data-dir /path/to/dir
+```
+
+**Option B: Download via HuggingFace CLI.**
+
+```bash
+huggingface-cli download imageomics/bioclip-image-search-lite --local-dir ~/.bioclip-search/data/
+```
+
+**Option C: Point to existing files.**
 
 ```bash
 # For CLI (saved for future runs)
@@ -99,16 +121,14 @@ bioclip-search config --set duckdb_path /path/to/metadata.duckdb
 python app.py --faiss-index /path/to/index.index --duckdb-path /path/to/metadata.duckdb
 ```
 
-**Option C: Build from upstream.** If you need to rebuild the DuckDB from the
-upstream SQLite or existing DuckDB:
+### Step 3: Verify
 
 ```bash
-python scripts/data/convert_duckdb_lite.py \
-    --from-duckdb /path/to/existing/metadata.duckdb \
-    --output /path/to/output/metadata.duckdb
+bioclip-search check
 ```
 
-Or submit as a SLURM job: `sbatch scripts/data/convert_duckdb_lite.slurm`
+This reports your Python version, torch build, GPU detection, data file status,
+and flags any issues with suggested fixes.
 
 ## CLI: `bioclip-search`
 
@@ -118,7 +138,10 @@ See [docs/cli-design.md](docs/cli-design.md) for the full specification.
 ### Quick start
 
 ```bash
-# First search — auto-downloads data (if needed) and starts background server
+# Download data files (~20 GB total)
+bioclip-search download
+
+# Search — auto-starts background server on first run
 bioclip-search photo.jpg
 
 # Subsequent searches are fast (server stays warm)
@@ -153,7 +176,7 @@ Persistent settings are stored in `~/.bioclip-search/config.json`:
 
 ```bash
 bioclip-search config --show
-bioclip-search config --set device cuda
+bioclip-search config --set device cuda        # embedding device
 bioclip-search config --set idle_timeout 60    # minutes
 bioclip-search config --set auto_start false
 ```
@@ -169,8 +192,6 @@ python app.py \
     --device cpu \
     --scope all
 ```
-
-Or on OSC: `sbatch scripts/launch_lite.slurm`
 
 Then open `http://<hostname>:7860` in your browser.
 
@@ -196,11 +217,13 @@ Scope filters (`has_url`, `in_bioclip2_training`, etc.) are applied in Python af
 ```
 src/bioclip_lite/
   config.py              # Configuration and CLI args
+  cli.py                 # CLI client, output formatting, config management
+  server.py              # Local HTTP daemon for CLI (keeps services in memory)
   services/
     model_service.py     # BioCLIP 2 embed + predict
     search_service.py    # FAISS vector search + DuckDB metadata
-    image_service.py     # URL fetching with rate limiting
-app.py                   # Gradio frontend
+    image_service.py     # HTTP-based image fetching with rate limiting
+app.py                   # Gradio web UI frontend
 ```
 
 ### Optimizations
@@ -215,7 +238,7 @@ This app doesn't store images — it fetches them from their original sources at
 
 ### Where the images come from
 
-Of the 234M images in the training set, 207M (88%) have stable source URLs. The majority are iNaturalist observations hosted on the [AWS Open Data](https://registry.opendata.aws/inaturalist-open-data/) program (`inaturalist-open-data.s3.amazonaws.com`), which is designed for public bulk access. The remaining URLs point to GBIF, Wikimedia, Flickr, and other providers.
+Of the 234M images in the training set, 207M (88%) have stable source URLs. The majority are iNaturalist observations hosted on the [AWS Open Data](https://registry.opendata.aws/inaturalist-open-data/) program (`inaturalist-open-data.s3.amazonaws.com`), which is designed for public bulk access. The remaining URLs point to GBIF publishers, Wikimedia, Flickr, and other providers.
 
 ### Respecting image servers
 
@@ -236,18 +259,6 @@ Compliance measures in [`image_service.py`](src/bioclip_lite/services/image_serv
 ### Hugging Face Spaces
 
 The app is hosted on HF Spaces with auto-deploy from GitHub. See [docs/deployment-hf-spaces.md](docs/deployment-hf-spaces.md) for the full setup guide — tokens, data hosting, CI/CD, resource limits, and upgrade options.
-
-### OSC
-
-```bash
-# One-time: prepare DuckDB
-sbatch scripts/data/convert_duckdb_lite.slurm
-
-# Launch the app
-sbatch scripts/launch_lite.slurm
-```
-
-Resources: 16 CPUs, 48 GB RAM, single process. The FAISS index and DuckDB are memory-mapped, so actual RSS is lower.
 
 ## Related
 

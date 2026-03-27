@@ -5,15 +5,17 @@ over 234M biological images. Reuses ModelService and SearchService from the
 existing web application.
 
 Usage:
-    bioclip-search photo.jpg
-    bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table
+    bioclip-search download                      # download data files
+    bioclip-search download --data-dir /path      # download to custom location
+    bioclip-search photo.jpg                      # search (auto-starts server)
+    bioclip-search photo.jpg --top-n 50 --format table
     bioclip-search photo.jpg --format csv --output results.csv
-    bioclip-search photo.jpg --local
-    bioclip-search serve
+    bioclip-search photo.jpg --local              # one-off search, no server
+    bioclip-search serve                          # start server in foreground
     bioclip-search stop
     bioclip-search status
     bioclip-search config --show
-    bioclip-search config --set faiss_index /path/to/index.index
+    bioclip-search config --set device cuda
 """
 
 import argparse
@@ -118,7 +120,7 @@ def handle_config(args: argparse.Namespace) -> None:
 
     if args.config_show:
         if not config:
-            _eprint("No configuration set. Run a search to trigger setup.")
+            _eprint("No configuration set. Run: bioclip-search download")
             return
         for key, value in sorted(config.items()):
             _eprint(f"  {key}: {value}")
@@ -139,7 +141,7 @@ def handle_config(args: argparse.Namespace) -> None:
 
     # Default: show config
     if not config:
-        _eprint("No configuration set. Run a search to trigger setup.")
+        _eprint("No configuration set. Run: bioclip-search download")
     else:
         for key, value in sorted(config.items()):
             _eprint(f"  {key}: {value}")
@@ -180,76 +182,72 @@ def resolve_data_paths(
     if faiss_path and duckdb_path:
         return faiss_path, duckdb_path
 
-    # Prompt user to download missing files
+    # Data not found — direct user to download command
     missing = []
     if not faiss_path:
-        missing.append("FAISS index     (~5.8 GB)  - 234M BioCLIP 2 image embeddings")
+        missing.append("FAISS index")
     if not duckdb_path:
-        missing.append("DuckDB metadata  (~14 GB)  - taxonomy and source metadata")
+        missing.append("DuckDB metadata")
 
-    _eprint("\nbioclip-search: data files not found.\n")
-    _eprint("The following files are required:")
-    for m in missing:
-        _eprint(f"  {m}")
-    _eprint(f"\nDownload to {DATA_DIR}? [Y/n] ", end="")
+    _eprint(f"Error: data files not found ({', '.join(missing)}).")
+    _eprint("")
+    _eprint("Download the required data files first:")
+    _eprint("")
+    _eprint("  bioclip-search download")
+    _eprint("")
+    _eprint("Or download to a custom location:")
+    _eprint("")
+    _eprint("  bioclip-search download --data-dir /path/to/dir")
+    _eprint("")
+    _eprint("Or point to existing files:")
+    _eprint("")
+    _eprint("  bioclip-search config --set faiss_index /path/to/index.index")
+    _eprint("  bioclip-search config --set duckdb_path /path/to/metadata.duckdb")
+    sys.exit(1)
 
-    try:
-        response = input().strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        _eprint("\nAborted.")
-        sys.exit(1)
 
-    if response and response not in ("y", "yes"):
-        _eprint(
-            "Aborted. Provide paths manually with --faiss-index and --duckdb-path,\n"
-            "or set them permanently with: bioclip-search config --set <key> <path>"
-        )
-        sys.exit(1)
+def handle_download(args: argparse.Namespace) -> None:
+    """Download required data files from HuggingFace Hub."""
+    from huggingface_hub import hf_hub_download
 
-    faiss_path, duckdb_path = _download_data(
-        need_faiss=not faiss_path,
-        need_duckdb=not duckdb_path,
-    )
+    data_dir = Path(args.data_dir) if args.data_dir else DATA_DIR
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save to config for future runs
+    hf_url = f"https://huggingface.co/{HF_DATA_REPO}"
+
+    _eprint(f"Source:      {hf_url}")
+    _eprint(f"Destination: {data_dir}")
+    _eprint("")
+
+    # Download FAISS index
+    _eprint(f"Downloading FAISS index ({HF_FAISS_PATH})...")
+    faiss_path = str(hf_hub_download(
+        repo_id=HF_DATA_REPO,
+        filename=HF_FAISS_PATH,
+        local_dir=str(data_dir),
+    ))
+    _eprint(f"  Saved to {faiss_path}")
+
+    # Download DuckDB metadata
+    _eprint(f"\nDownloading DuckDB metadata ({HF_DUCKDB_PATH})...")
+    duckdb_path = str(hf_hub_download(
+        repo_id=HF_DATA_REPO,
+        filename=HF_DUCKDB_PATH,
+        local_dir=str(data_dir),
+    ))
+    _eprint(f"  Saved to {duckdb_path}")
+
+    # Save paths to config
     config = load_config()
     config["faiss_index"] = faiss_path
     config["duckdb_path"] = duckdb_path
     save_config(config)
-    _eprint(f"Paths saved to {CONFIG_FILE}\n")
 
-    return faiss_path, duckdb_path
-
-
-def _download_data(need_faiss: bool, need_duckdb: bool) -> tuple[str, str]:
-    """Download data files from HuggingFace Hub."""
-    from huggingface_hub import hf_hub_download
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    faiss_path = ""
-    duckdb_path = ""
-
-    if need_faiss:
-        _eprint(f"\nDownloading FAISS index from {HF_DATA_REPO}...")
-        downloaded = hf_hub_download(
-            repo_id=HF_DATA_REPO,
-            filename=HF_FAISS_PATH,
-            local_dir=str(DATA_DIR),
-        )
-        faiss_path = str(downloaded)
-        _eprint(f"  Saved to {faiss_path}")
-
-    if need_duckdb:
-        _eprint(f"\nDownloading DuckDB metadata from {HF_DATA_REPO}...")
-        downloaded = hf_hub_download(
-            repo_id=HF_DATA_REPO,
-            filename=HF_DUCKDB_PATH,
-            local_dir=str(DATA_DIR),
-        )
-        duckdb_path = str(downloaded)
-        _eprint(f"  Saved to {duckdb_path}")
-
-    return faiss_path, duckdb_path
+    _eprint("")
+    _eprint("Download complete. Paths saved to config.")
+    _eprint(f"  Config file: {CONFIG_FILE}")
+    _eprint("")
+    _eprint("Verify with: bioclip-search config --show")
 
 
 # ------------------------------------------------------------------
@@ -432,6 +430,150 @@ def handle_status(args: argparse.Namespace) -> None:
     _eprint(f"  DuckDB:  {resp.get('duckdb_rows', 0):,} rows")
     if auto_shutdown is not None:
         _eprint(f"  Auto-shutdown in {_format_duration(auto_shutdown)}")
+
+
+# ------------------------------------------------------------------
+# Check
+# ------------------------------------------------------------------
+
+
+def handle_check(args: argparse.Namespace) -> None:
+    """Check installation, data, and server status."""
+    import platform
+
+    issues = []
+
+    # -- Environment --
+    _eprint("Environment:")
+    _eprint(f"  Python:    {platform.python_version()}")
+    _eprint(f"  Platform:  {platform.system()} {platform.release()}")
+
+    try:
+        import torch
+
+        torch_version = torch.__version__
+        cuda_available = torch.cuda.is_available()
+        cuda_built = torch.version.cuda is not None
+
+        _eprint(f"  torch:     {torch_version}")
+
+        if cuda_available:
+            device_name = torch.cuda.get_device_name(0)
+            _eprint(f"  CUDA:      available ({device_name})")
+        elif cuda_built:
+            _eprint(f"  CUDA:      built-in but no GPU detected")
+        else:
+            # Check if NVIDIA GPU hardware exists despite CPU-only torch
+            gpu_detected = False
+            if platform.system() == "Linux":
+                try:
+                    result = subprocess.run(
+                        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        gpu_detected = True
+                        gpu_name = result.stdout.strip().split("\n")[0]
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+            elif platform.system() == "Windows":
+                try:
+                    result = subprocess.run(
+                        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        gpu_detected = True
+                        gpu_name = result.stdout.strip().split("\n")[0]
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+
+            if gpu_detected:
+                _eprint(f"  CUDA:      not available (torch is CPU-only)")
+                _eprint(f"  GPU:       {gpu_name} (detected but not usable)")
+                issues.append(
+                    "CUDA GPU detected but torch is CPU-only. Reinstall torch with CUDA:\n"
+                    "\n"
+                    "    uv pip install torch --extra-index-url https://download.pytorch.org/whl/cu121"
+                )
+            else:
+                _eprint(f"  CUDA:      not available")
+
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            _eprint(f"  MPS:       available")
+
+    except ImportError:
+        _eprint(f"  torch:     not installed")
+        issues.append("torch is not installed. Run: uv pip install torch")
+
+    # -- Data --
+    _eprint("")
+    _eprint("Data:")
+    config = load_config()
+
+    faiss_path = config.get("faiss_index", "")
+    duckdb_path = config.get("duckdb_path", "")
+
+    # Also check default location
+    if not faiss_path:
+        default = DATA_DIR / "faiss" / "index.index"
+        if default.is_file():
+            faiss_path = str(default)
+    if not duckdb_path:
+        default = DATA_DIR / "duckdb" / "metadata.duckdb"
+        if default.is_file():
+            duckdb_path = str(default)
+
+    if faiss_path and os.path.isfile(faiss_path):
+        size_gb = os.path.getsize(faiss_path) / (1024 ** 3)
+        _eprint(f"  FAISS index:  {faiss_path} ({size_gb:.1f} GB)")
+    elif faiss_path:
+        _eprint(f"  FAISS index:  {faiss_path} (file not found)")
+        issues.append(f"FAISS index configured but file not found: {faiss_path}")
+    else:
+        _eprint(f"  FAISS index:  not configured")
+        issues.append("FAISS index not configured. Run: bioclip-search download")
+
+    if duckdb_path and os.path.isfile(duckdb_path):
+        size_gb = os.path.getsize(duckdb_path) / (1024 ** 3)
+        _eprint(f"  DuckDB:       {duckdb_path} ({size_gb:.1f} GB)")
+    elif duckdb_path:
+        _eprint(f"  DuckDB:       {duckdb_path} (file not found)")
+        issues.append(f"DuckDB configured but file not found: {duckdb_path}")
+    else:
+        _eprint(f"  DuckDB:       not configured")
+        issues.append("DuckDB not configured. Run: bioclip-search download")
+
+    # -- Server --
+    _eprint("")
+    _eprint("Server:")
+    info = _get_server_info()
+    if info:
+        port = info["port"]
+        resp = _server_request(port, "GET", "/status", timeout=5)
+        if resp and resp.get("status") == "running":
+            _eprint(f"  Status:  running (PID {resp['pid']}, port {resp['port']})")
+            _eprint(f"  Device:  {resp.get('device', '?')}")
+        else:
+            _eprint(f"  Status:  not responding (stale PID file)")
+    else:
+        _eprint(f"  Status:  not running")
+
+    # -- Config --
+    _eprint("")
+    _eprint(f"Config:  {CONFIG_FILE}")
+
+    # -- Summary --
+    if issues:
+        _eprint("")
+        _eprint(f"Issues found ({len(issues)}):")
+        for i, issue in enumerate(issues, 1):
+            _eprint("")
+            for line in issue.split("\n"):
+                _eprint(f"  {line}" if line.strip() else "")
+    else:
+        _eprint("")
+        _eprint("No issues found.")
 
 
 # ------------------------------------------------------------------
@@ -738,6 +880,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Search 234M biological images using BioCLIP 2 embeddings.",
         epilog=(
             "examples:\n"
+            "  bioclip-search download                           # download data files\n"
+            "  bioclip-search download --data-dir /shared/data   # download to custom path\n"
             "  bioclip-search photo.jpg                          # search (auto-starts server)\n"
             "  bioclip-search photo.jpg --top-n 50 --scope inaturalist --format table\n"
             "  bioclip-search photo.jpg --format csv --output results.csv\n"
@@ -754,6 +898,8 @@ def build_parser() -> argparse.ArgumentParser:
         "image",
         help=(
             'Path to query image, or a command: '
+            '"download" (fetch data files), '
+            '"check" (verify installation), '
             '"config" (manage settings), '
             '"serve" (start server in foreground), '
             '"stop" (stop server), '
@@ -800,7 +946,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run search locally (skip server, load everything in-process)",
     )
 
-    server = p.add_argument_group("server/data options (search, serve)")
+    server = p.add_argument_group("server/data options")
+    server.add_argument(
+        "--data-dir",
+        metavar="PATH",
+        default=None,
+        help=f"Download destination directory (default: {DATA_DIR})",
+    )
     server.add_argument(
         "--device",
         choices=["cpu", "cuda", "mps"],
@@ -853,7 +1005,11 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     command = args.image
-    if command == "config":
+    if command == "download":
+        handle_download(args)
+    elif command == "check":
+        handle_check(args)
+    elif command == "config":
         handle_config(args)
     elif command == "serve":
         handle_serve(args)
