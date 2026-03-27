@@ -35,21 +35,24 @@ description: >-
 
 # BioCLIP Image Search Lite
 
-**[Try it live on Hugging Face Spaces](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite)**
+Upload a photo of an organism and find visually similar images from
+[TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) image collections — without needing 92 TB of local image storage.
 
-A lightweight version of the [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) image search system. Upload a photo of an organism and find visually similar images from 200M+ training samples — without needing 92 TB of local image storage.
-
-The trick: instead of storing images locally, we serve them directly from their source URLs (iNaturalist S3, GBIF, Wikimedia, etc.). This brings the total deployment footprint from ~92 TB down to ~32 GB.
-
-**Source code:** [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite)
+|  |  |
+|---|---|
+| **Live Demo** | [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) on Hugging Face Spaces |
+| **Source Code** | [Imageomics/bioclip-image-search-lite](https://github.com/Imageomics/bioclip-image-search-lite) (lite) · [Imageomics/bioclip-vector-db](https://github.com/Imageomics/bioclip-vector-db) (full) |
+| **Data Files** | [imageomics/bioclip-image-search-lite](https://huggingface.co/imageomics/bioclip-image-search-lite) on Hugging Face |
+| **CLI Tool** | `bioclip-search` — see [CLI docs](docs/cli-design.md) |
+| **Model** | [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) via [pybioclip](https://github.com/Imageomics/pybioclip) |
 
 ## How it works
 
 ```
-Upload image → BioCLIP 2 embedding → FAISS search (200M vectors) → DuckDB metadata → Fetch from source URLs
+Upload image → BioCLIP 2 embedding → FAISS search (234M vectors) → DuckDB metadata → Fetch from source URLs
 ```
 
-Everything runs in a single Gradio process. No microservices, no HDF5 files.
+Images are fetched directly from their source URLs (iNaturalist S3, GBIF publishers, Wikimedia, etc.) at query time. No images are stored locally.
 
 | Component | Size |
 |-----------|------|
@@ -265,8 +268,3 @@ Compliance measures in [`image_service.py`](src/bioclip_lite/services/image_serv
 
 The app is hosted on HF Spaces with auto-deploy from GitHub. See [docs/deployment-hf-spaces.md](docs/deployment-hf-spaces.md) for the full setup guide — tokens, data hosting, CI/CD, resource limits, and upgrade options.
 
-## Related
-
-- [bioclip-vector-db](https://github.com/Imageomics/bioclip-vector-db) — Full system with HDF5 image storage
-- [pybioclip](https://github.com/Imageomics/pybioclip) — BioCLIP Python client
-- [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) — The underlying vision model
