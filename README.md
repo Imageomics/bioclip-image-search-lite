@@ -62,7 +62,7 @@ Everything runs in a single Gradio process. No microservices, no HDF5 files.
 
 ### Step 1: Install
 
-**Linux / macOS (CPU):**
+**Linux / Windows/ macOS (CPU):**
 
 ```bash
 uv venv .venv --python 3.10
@@ -95,12 +95,17 @@ Both the web UI and CLI need two data files (~20 GB total), hosted on HuggingFac
 
 Schema, source, and curation details can be found in the [dataset card](https://huggingface.co/imageomics/bioclip-image-search-lite/blob/main/README.md).
 
+> **Tip:** Authenticate with HuggingFace to avoid rate-limited downloads:
+> ```bash
+> huggingface-cli login
+> ```
+
 **Option A: Download via CLI.**
 
 ```bash
 bioclip-search download
 
-# Or to a custom location (e.g., shared HPC storage)
+# Or to a custom location
 bioclip-search download --data-dir /path/to/dir
 ```
 

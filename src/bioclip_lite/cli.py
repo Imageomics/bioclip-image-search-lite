@@ -506,6 +506,28 @@ def handle_check(args: argparse.Namespace) -> None:
         _eprint(f"  torch:     not installed")
         issues.append("torch is not installed. Run: uv pip install torch")
 
+    # -- HuggingFace auth --
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        token_info = api.token
+        if token_info:
+            _eprint(f"  HF auth:   authenticated")
+        else:
+            _eprint(f"  HF auth:   not authenticated")
+            issues.append(
+                "HuggingFace not authenticated. Downloads may be rate-limited.\n"
+                "  Run: huggingface-cli login"
+            )
+    except ImportError:
+        _eprint(f"  HF auth:   huggingface_hub not installed")
+    except Exception:
+        _eprint(f"  HF auth:   not authenticated")
+        issues.append(
+            "HuggingFace not authenticated. Downloads may be rate-limited.\n"
+            "  Run: huggingface-cli login"
+        )
+
     # -- Data --
     _eprint("")
     _eprint("Data:")
