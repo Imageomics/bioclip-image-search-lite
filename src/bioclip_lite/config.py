@@ -52,7 +52,7 @@ class LiteConfig:
         'id, uuid, kingdom, phylum, class, "order", family, genus, species, '
         "common_name, source_dataset, source_id, publisher, img_type, "
         "basisOfRecord, url_prefix_id, identifier_suffix, has_url, "
-        "in_bioclip2_training"
+        "in_bioclip2_training, in_bioclip2_5_training"
     )
 
 
@@ -143,7 +143,7 @@ def parse_args() -> LiteConfig:
     p.add_argument("--model-str", default=None, help="Model identifier")
     p.add_argument(
         "--scope", default="all",
-        choices=["all", "url_only", "inaturalist", "bioclip2_training"],
+        choices=["all", "url_only", "inaturalist", "bioclip2_training", "bioclip2_5_training"],
     )
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=7860)
