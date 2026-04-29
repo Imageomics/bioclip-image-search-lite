@@ -43,7 +43,6 @@ SCOPE_CHOICES = [
     "URL-Available Only",
     "iNaturalist Only",
     "BioCLIP 2 Training",
-    "BioCLIP 2.5 Huge Training",
 ]
 
 

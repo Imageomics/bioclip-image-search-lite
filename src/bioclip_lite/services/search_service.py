@@ -20,7 +20,6 @@ SCOPE_MAP = {
     "URL-Available Only": "url_only",
     "iNaturalist Only": "inaturalist",
     "BioCLIP 2 Training": "bioclip2_training",
-    "BioCLIP 2.5 Huge Training": "bioclip2_5_training",
 }
 
 
@@ -180,8 +179,6 @@ class SearchService:
             ]
         elif scope == "bioclip2_training":
             results = [r for r in results if r.get("in_bioclip2_training")]
-        elif scope == "bioclip2_5_training":
-            results = [r for r in results if r.get("in_bioclip2_5_training")]
 
         return results
 
