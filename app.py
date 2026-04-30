@@ -591,7 +591,7 @@ def main():
     app = BioCLIPLiteApp(config)
     demo = app.create_interface()
     logger.info(f"Launching Gradio on {config.host}:{config.port}")
-    demo.launch(server_name=config.host, server_port=config.port)
+    demo.launch(server_name=config.host, server_port=config.port, ssr_mode=False)
 
 
 if __name__ == "__main__":
