@@ -5,7 +5,7 @@ numpy
 pybioclip
 faiss-cpu
 duckdb
-gradio>=5,<6
+gradio
 Pillow
 requests
 huggingface_hub
