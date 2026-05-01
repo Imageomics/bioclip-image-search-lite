@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 import requests
 from PIL import Image
 
+from .. import __version__
+
 logger = logging.getLogger(__name__)
 
 # Domains served via AWS Open Data (no iNat rate limiting)
@@ -32,7 +34,10 @@ RATE_LIMITED_DOMAINS = frozenset({
     "static.inaturalist.org",
 })
 
-USER_AGENT = "BioCLIP-Lite/1.0 (academic research; imageomics.org)"
+USER_AGENT = (
+    f"bioclip-image-search-lite/{__version__} "
+    "(+https://github.com/Imageomics/bioclip-image-search-lite)"
+)
 
 
 class _TokenBucket:
