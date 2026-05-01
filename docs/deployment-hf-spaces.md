@@ -21,13 +21,13 @@ The FAISS index (5.8 GB) and DuckDB (25.8 GB) are too large for a Space's git re
 
 ```bash
 # From a machine with huggingface_hub installed
-huggingface-cli repo create bioclip-image-search-lite --type model
+hf repo create bioclip-image-search-lite --type model
 
 # Upload data files (uses Git LFS under the hood)
-huggingface-cli upload bioclip-image-search-lite \
+hf upload bioclip-image-search-lite \
     /path/to/index.index faiss/index.index
 
-huggingface-cli upload bioclip-image-search-lite \
+hf upload bioclip-image-search-lite \
     /path/to/metadata.duckdb duckdb/metadata.duckdb
 ```
 
@@ -49,7 +49,7 @@ Go to [huggingface.co/new-space](https://huggingface.co/new-space) and create a 
 Or via CLI:
 
 ```bash
-huggingface-cli repo create bioclip-image-search-lite --type space --space-sdk gradio
+hf repo create bioclip-image-search-lite --type space --space-sdk gradio
 ```
 
 ### 3. Configure the README metadata

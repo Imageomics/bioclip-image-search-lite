@@ -19,6 +19,15 @@ dependencies = [
     "requests",
 ]
 
+[project.scripts]
+bioclip-search = "bioclip_lite.cli:main"
+
 [project.optional-dependencies]
 gpu = ["faiss-gpu-cu12"]
 dev = ["pytest", "black", "isort"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bioclip_lite"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/bioclip_lite"]
