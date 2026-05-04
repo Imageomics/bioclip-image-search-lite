@@ -24,4 +24,4 @@ gpu = ["faiss-gpu-cu12"]
 dev = ["pytest", "black", "isort"]
 
 [tool.hatch.version]
-path = "src/bioclip_lite/__init__.py"
+path = "src/bioclip_lite/__about__.py"

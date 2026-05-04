@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 import requests
 from PIL import Image
 
-from .. import __version__
+from .. import __about__
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,14 @@ RATE_LIMITED_DOMAINS = frozenset({
     "static.inaturalist.org",
 })
 
-USER_AGENT = (
-    f"bioclip-image-search-lite/{__version__} "
-    "(+https://github.com/Imageomics/bioclip-image-search-lite)"
-)
+# User-Agent components, sourced from __about__.py so a repo move or
+# rename touches one file. Format follows the name/version (+URL)
+# convention used by Googlebot and other major crawlers.
+PRODUCT_NAME = __about__.__title__
+PRODUCT_VERSION = __about__.__version__
+PRODUCT_URL = __about__.__url__
+
+USER_AGENT = f"{PRODUCT_NAME}/{PRODUCT_VERSION} (+{PRODUCT_URL})"
 
 
 class _TokenBucket:
