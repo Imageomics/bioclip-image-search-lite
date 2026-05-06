@@ -34,12 +34,12 @@ RATE_LIMITED_DOMAINS = frozenset({
     "static.inaturalist.org",
 })
 
-# User-Agent components, sourced from __about__.py so a repo move or
-# rename touches one file. Format follows the name/version (+URL)
-# convention used by Googlebot and other major crawlers.
-PRODUCT_NAME = __about__.__title__
+# User-Agent components. Version is the canonical source from __about__.py;
+# name and URL are bound here since they are UA-specific. Format follows the
+# name/version (+URL) convention used by Googlebot and other major crawlers.
+PRODUCT_NAME = "bioclip-image-search-lite"
 PRODUCT_VERSION = __about__.__version__
-PRODUCT_URL = __about__.__url__
+PRODUCT_URL = "https://github.com/Imageomics/bioclip-image-search-lite"
 
 USER_AGENT = f"{PRODUCT_NAME}/{PRODUCT_VERSION} (+{PRODUCT_URL})"
 
