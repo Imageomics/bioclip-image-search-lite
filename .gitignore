@@ -10,3 +10,10 @@ logs/
 
 # SLURM output files
 *.out
+*.err
+
+# Spark application working directories (created by spark-class workers)
+app-*/
+
+# Local dry-run scripts and artifacts (not part of the open-source pipeline)
+dryrun/
