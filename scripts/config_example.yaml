@@ -169,21 +169,15 @@ resources:
   # Walltimes are ~5x the production TOL-200M measurements (see README's
   # "Resource expectations"); raise `shards.walltime` if you reduce
   # `shards.n_shards` below 8 (single-GPU runs encode ~50 min for 233M).
-  # `partition` is optional: omit to use the cluster default.
-  manifest:     {cpu: 8,  mem: "64G",  walltime: "00:15:00"}
-  sample:       {cpu: 16, mem: "200G", walltime: "00:30:00"}
-  train_leader: {cpu: 16, mem: "200G", walltime: "00:30:00", gpu: 1}
-  shards:       {cpu: 16, mem: "100G", walltime: "01:00:00", gpu: 1, array_size: 8}
-  merge:        {cpu: 32, mem: "64G",  walltime: "00:15:00"}
-  duckdb:       {cpu: 16, mem: "884G", walltime: "00:30:00"}
-  verify:       {cpu: 8,  mem: "32G",  walltime: "00:15:00"}
-
-# Example for a cluster with named partitions (e.g. OSC cardinal):
-# resources:
-#   manifest:     {partition: "cpu",     cpu: 8,  mem: "64G",  walltime: "00:15:00"}
-#   sample:       {partition: "cpu",     cpu: 16, mem: "200G", walltime: "00:30:00"}
-#   train_leader: {partition: "gpu",     cpu: 16, mem: "200G", walltime: "00:30:00", gpu: 1}
-#   shards:       {partition: "gpu",     cpu: 16, mem: "100G", walltime: "01:00:00", gpu: 1, array_size: 8}
-#   merge:        {partition: "cpu",     cpu: 32, mem: "64G",  walltime: "00:15:00"}
-#   duckdb:       {partition: "hugemem", cpu: 16, mem: "884G", walltime: "00:30:00"}
-#   verify:       {partition: "cpu",     cpu: 8,  mem: "32G",  walltime: "00:15:00"}
+  # Partitions below (cpu / gpu / hugemem) reflect what the production build
+  # used; rename to match your cluster's partition names. Replace
+  # `<your-account>` with your SLURM account; if you prefer to set it once
+  # outside the config, omit the `account` field and export SBATCH_ACCOUNT in
+  # the shell that calls submit_pipeline.sh.
+  manifest:     {account: "<your-account>", partition: "cpu",     cpu: 8,  mem: "64G",  walltime: "00:15:00"}
+  sample:       {account: "<your-account>", partition: "cpu",     cpu: 16, mem: "200G", walltime: "00:30:00"}
+  train_leader: {account: "<your-account>", partition: "gpu",     cpu: 16, mem: "200G", walltime: "00:30:00", gpu: 1}
+  shards:       {account: "<your-account>", partition: "gpu",     cpu: 16, mem: "100G", walltime: "01:00:00", gpu: 1, array_size: 8}
+  merge:        {account: "<your-account>", partition: "cpu",     cpu: 32, mem: "64G",  walltime: "00:15:00"}
+  duckdb:       {account: "<your-account>", partition: "hugemem", cpu: 16, mem: "884G", walltime: "00:30:00"}
+  verify:       {account: "<your-account>", partition: "cpu",     cpu: 8,  mem: "32G",  walltime: "00:15:00"}

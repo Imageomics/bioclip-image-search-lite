@@ -149,6 +149,14 @@ class ResourceSpec(BaseModel):
         default=None,
         description="SLURM partition. Omit to use the cluster default.",
     )
+    account:    Optional[str] = Field(
+        default=None,
+        description=(
+            "SLURM allocation/account to bill against (sbatch --account). "
+            "Omit to fall back to SBATCH_ACCOUNT in the calling shell, or "
+            "the cluster default."
+        ),
+    )
     # The two below are only used by multi-node Spark phases. Single-node
     # phases (everything else) leave them at defaults.
     nodes:           Optional[int] = Field(default=None, ge=1)

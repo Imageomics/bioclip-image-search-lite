@@ -67,6 +67,7 @@ for entry in "${PHASES[@]}"; do
     gpu=$(read_resource "$phase" gpu)
     array=$(read_resource "$phase" array_size)
     partition=$(read_resource "$phase" partition)
+    account=$(read_resource "$phase" account)
     nodes=$(read_resource "$phase" nodes)
     tasks_per_node=$(read_resource "$phase" tasks_per_node)
 
@@ -79,6 +80,9 @@ for entry in "${PHASES[@]}"; do
     fi
     if [[ -n "$partition" ]]; then
         sbatch_args+=( --partition="$partition" )
+    fi
+    if [[ -n "$account" ]]; then
+        sbatch_args+=( --account="$account" )
     fi
     if [[ -n "$nodes" ]]; then
         sbatch_args+=( --nodes="$nodes" )
