@@ -123,7 +123,7 @@ class BioCLIPLiteApp:
                 [img], rank=rank.lower(), k=5
             )
             embedding = embeddings[0].tolist()
-            pred_html = self._pred_html(preds[0] if preds else None, rank)
+            pred_html = self._pred_html(preds[0] if preds else None)
         except Exception as e:
             logger.error(f"embed_and_classify failed ({e}); falling back to separate calls")
             embedding = self.model_service.embed([img], normalize=True)[0].tolist()
@@ -226,7 +226,7 @@ class BioCLIPLiteApp:
                 # fetch_full_resolution() requests the original URL as-stored
                 # (no size rewrite), so this is the true full-res image.
                 with phase("full_res_fetch", idx=evt.index):
-                    img, status = self.image_service.fetch_full_resolution(url)
+                    img, _ = self.image_service.fetch_full_resolution(url)
                 if img is not None:
                     meta["image_full"] = img
             if img is None:
@@ -254,7 +254,7 @@ class BioCLIPLiteApp:
                 preds = self.model_service.classify_from_embedding(
                     embedding, rank=rank.lower(), k=5
                 )
-                return self._pred_html(preds[0] if preds else None, rank)
+                return self._pred_html(preds[0] if preds else None)
             except Exception as e:
                 logger.error(f"classify_from_embedding failed ({e}); re-encoding")
         return self._predict_html(img, rank)
@@ -288,16 +288,16 @@ class BioCLIPLiteApp:
         """Generate prediction HTML by encoding the image (fallback path)."""
         try:
             preds = self.model_service.predict([img], rank=rank.lower(), k=k)
-            return self._pred_html(preds[0] if preds else None, rank)
+            return self._pred_html(preds[0] if preds else None)
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
             return f"<p style='color:#f88;'>Prediction error: {e}</p>"
 
     @staticmethod
-    def _pred_html(preds_for_image: Optional[List[Dict]], rank: str) -> str:
+    def _pred_html(preds_for_image: Optional[List[Dict]]) -> str:
         """Format a single image's prediction list into HTML."""
         if preds_for_image:
-            return _format_predictions(preds_for_image, rank)
+            return _format_predictions(preds_for_image)
         return "<p style='color:#f88;'>No predictions returned.</p>"
 
     @staticmethod
@@ -576,7 +576,7 @@ def _prediction_placeholder() -> str:
     return "<p style='color:#888;'>Upload an image to get predictions.</p>"
 
 
-def _format_predictions(predictions: List[Dict], rank: str) -> str:
+def _format_predictions(predictions: List[Dict]) -> str:
     if not predictions:
         return "<p style='color:#888;'>No predictions available.</p>"
 
