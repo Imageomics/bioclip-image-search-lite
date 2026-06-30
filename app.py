@@ -25,6 +25,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from src.bioclip_lite.config import LiteConfig, parse_args, resolve_data_paths, setup_logging
+from src.bioclip_lite.instrument import phase
 from src.bioclip_lite.services.image_service import ImageService
 from src.bioclip_lite.services.model_service import ModelService
 from src.bioclip_lite.services.search_service import SearchService
@@ -73,16 +74,21 @@ class BioCLIPLiteApp:
         self.config = config
 
         logger.info("Initializing services...")
-        self.model_service = ModelService(
-            device=config.device, model_str=config.model_str
-        )
-        self.search_service = SearchService(
-            faiss_index_path=config.faiss_index_path,
-            duckdb_path=config.duckdb_path,
-            nprobe=config.default_nprobe,
-            over_fetch_factor=config.over_fetch_factor,
-            metadata_columns=config.METADATA_COLUMNS,
-        )
+        # Cold-start phases are timed explicitly: model load and index/DB load
+        # dominate the first-ever user request and are the headline cold-start
+        # cost (see docs/ux-image-fetch-issue.md).
+        with phase("model_load"):
+            self.model_service = ModelService(
+                device=config.device, model_str=config.model_str
+            )
+        with phase("index_load"):
+            self.search_service = SearchService(
+                faiss_index_path=config.faiss_index_path,
+                duckdb_path=config.duckdb_path,
+                nprobe=config.default_nprobe,
+                over_fetch_factor=config.over_fetch_factor,
+                metadata_columns=config.METADATA_COLUMNS,
+            )
         self.image_service = ImageService(
             timeout=config.image_fetch_timeout,
             max_workers=config.image_fetch_max_workers,

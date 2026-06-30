@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -103,6 +104,12 @@ def resolve_data_paths(config: LiteConfig) -> LiteConfig:
 
     If paths are already set (via CLI args), they are used as-is.
     Otherwise, downloads from the HF data repo using huggingface_hub.
+    # Silence the repeated Starlette deprecation warning Gradio emits on every
+    # request (HTTP_422_UNPROCESSABLE_ENTITY) — pure noise, not actionable here.
+    warnings.filterwarnings(
+        "ignore", message=".*HTTP_422_UNPROCESSABLE_ENTITY.*"
+    )
+
     """
     if config.faiss_index_path and config.duckdb_path:
         return config
