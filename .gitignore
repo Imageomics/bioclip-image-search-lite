@@ -8,5 +8,12 @@ build/
 *.index
 logs/
 
-# SLURM output files
+# SLURM output / error files
 *.out
+*.err
+
+# Local agent state
+.claude/
+
+# Local pipeline dry-run workspace (configs + logs; never committed)
+dryrun/
