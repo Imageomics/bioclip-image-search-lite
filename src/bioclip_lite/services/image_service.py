@@ -11,6 +11,7 @@ Key distinction:
 
 import io
 import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,6 +22,17 @@ import requests
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# iNaturalist AWS Open Data bucket — 59% of our URLs. Serves size variants
+# (original|large|medium|small|thumb) at /photos/<id>/<variant>.<ext>.
+# Documented at https://github.com/inaturalist/inaturalist-open-data.
+INAT_S3_HOST = "inaturalist-open-data.s3.amazonaws.com"
+# Captures: (scheme+host+/photos/<id>/)(variant)(.ext)(?querystring)
+_INAT_S3_PATH_RE = re.compile(r"^(.*?/photos/\d+/)(\w+)(\.\w+)(\?.*)?$")
+INAT_S3_VARIANTS = ("original", "large", "medium", "small", "thumb")
+
+# Sentinel distinguishing "url absent from cache" from "url cached as a miss".
+_CACHE_MISS = object()
 
 # Domains served via AWS Open Data (no iNat rate limiting)
 S3_OPEN_DATA_DOMAINS = frozenset({
@@ -65,10 +77,28 @@ class ImageService:
         timeout: int = 10,
         max_workers: int = 8,
         thumbnail_max_dim: int = 256,
+        variant: Optional[str] = None,
+        enable_cache: bool = False,
+        cache_max: int = 512,
     ):
         self.timeout = timeout
         self.max_workers = max_workers
         self.thumbnail_max_dim = thumbnail_max_dim
+
+        # Size variant to request for iNat S3 URLs (None = leave URL as-is,
+        # i.e. whatever the DB stored, usually 'original'). See INAT_S3_VARIANTS.
+        self.variant = variant
+
+        # Optional process-level image cache (url -> PIL.Image | None).
+        # Off by default to preserve current behavior; the latency benchmark
+        # flips it on to measure warm-cache searches.
+        self.enable_cache = enable_cache
+        self._cache_max = cache_max
+        self._cache: Dict[str, Optional[Image.Image]] = {}
+        self._cache_lock = threading.Lock()
+
+        # Bytes downloaded during the most recent fetch_images() call.
+        self._last_call_bytes = 0
 
         # Rate limiter for iNat CDN domains (1 req/sec)
         self._cdn_limiter = _TokenBucket(rate=1.0)
@@ -95,6 +125,7 @@ class ImageService:
         and 'image_status' fields.
         """
         t0 = time.monotonic()
+        self._last_call_bytes = 0  # reset per-call byte counter
 
         # Partition into rate-limited vs unrestricted
         rate_limited_indices = []
@@ -125,7 +156,8 @@ class ImageService:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
                 futures = {
                     pool.submit(
-                        self._fetch_single, metadata_list[i].get("identifier")
+                        self._fetch_single,
+                        self.rewrite_variant(metadata_list[i].get("identifier")),
                     ): i
                     for i in unrestricted_indices
                 }
@@ -142,7 +174,9 @@ class ImageService:
         for i in rate_limited_indices:
             self._cdn_limiter.acquire()
             try:
-                img, status = self._fetch_single(metadata_list[i].get("identifier"))
+                img, status = self._fetch_single(
+                    self.rewrite_variant(metadata_list[i].get("identifier"))
+                )
             except Exception as e:
                 img, status = None, f"error:{e}"
             metadata_list[i]["image"] = img
@@ -150,11 +184,14 @@ class ImageService:
 
         dt = time.monotonic() - t0
         statuses = [m.get("image_status", "?") for m in metadata_list]
-        ok = statuses.count("ok")
+        ok = sum(1 for s in statuses if s in ("ok", "ok_cached"))
+        cached = statuses.count("ok_cached")
+        no_url = statuses.count("no_url")
         logger.info(
             f"Fetched {len(metadata_list)} images in {dt:.2f}s "
-            f"(ok={ok}, no_url={statuses.count('no_url')}, "
-            f"failed={len(metadata_list) - ok - statuses.count('no_url')})"
+            f"(ok={ok}, cached={cached}, no_url={no_url}, "
+            f"failed={len(metadata_list) - ok - no_url}, "
+            f"{self._last_call_bytes / 1024:.0f}KB)"
         )
         return metadata_list
 
@@ -162,6 +199,12 @@ class ImageService:
         """Fetch one image. Returns (PIL Image or None, status string)."""
         if not url:
             return None, "no_url"
+
+        # Cache lookup (cached hits cost zero bytes — this is the warm path)
+        if self.enable_cache:
+            hit = self._cache_get(url)
+            if hit is not _CACHE_MISS:
+                return hit, "ok_cached" if hit is not None else "cached_fail"
 
         domain = urlparse(url).hostname or "?"
         t0 = time.monotonic()
@@ -172,16 +215,19 @@ class ImageService:
                 self._track_bytes(url, len(resp.content))
                 img = Image.open(io.BytesIO(resp.content)).convert("RGB")
                 logger.debug(f"OK {domain} {len(resp.content)/1024:.0f}KB {dt:.2f}s")
+                self._cache_put(url, img)
                 return img, "ok"
             elif resp.status_code == 429:
                 logger.warning(f"Rate limited (429) from {domain} after {dt:.2f}s")
-                return None, "rate_limited"
+                return None, "rate_limited"  # transient — do not cache
             else:
                 logger.debug(f"HTTP {resp.status_code} from {domain} after {dt:.2f}s")
+                if 400 <= resp.status_code < 500:
+                    self._cache_put(url, None)  # permanent miss — cache it
                 return None, f"http_{resp.status_code}"
         except requests.Timeout:
             logger.debug(f"Timeout from {domain} after {self.timeout}s")
-            return None, "timeout"
+            return None, "timeout"  # transient — do not cache
         except Exception as e:
             logger.debug(f"Error from {domain}: {e}")
             return None, f"error:{str(e)[:80]}"
@@ -203,16 +249,45 @@ class ImageService:
         )
         return thumb
 
-    @staticmethod
-    def get_thumbnail_url(url: str) -> str:
-        """Transform URL to thumbnail variant if the CDN supports it."""
-        if "static.inaturalist.org" in url and "/original/" in url:
-            return url.replace("/original/", "/medium/")
-        return url
+    def rewrite_variant(self, url: Optional[str]) -> Optional[str]:
+        """Rewrite an iNat S3 URL to ``self.variant`` size, if applicable.
+
+        No-op when ``self.variant`` is None, the host isn't the iNat S3
+        bucket, or the path doesn't match the documented
+        ``/photos/<id>/<variant>.<ext>`` shape. Other hosts (observation.org,
+        eol, etc.) are left untouched — they have their own URL grammars.
+        """
+        if not url or not self.variant or INAT_S3_HOST not in url:
+            return url
+        m = _INAT_S3_PATH_RE.match(url)
+        if not m:
+            return url
+        head, _old_variant, ext, qs = m.groups()
+        return f"{head}{self.variant}{ext}{qs or ''}"
+
+    # ------------------------------------------------------------------
+    # Image cache (process-level, bounded, thread-safe). Caches misses too.
+    # ------------------------------------------------------------------
+    def _cache_get(self, url: str):
+        with self._cache_lock:
+            return self._cache.get(url, _CACHE_MISS)
+
+    def _cache_put(self, url: str, img: Optional[Image.Image]):
+        with self._cache_lock:
+            if url not in self._cache and len(self._cache) >= self._cache_max:
+                # FIFO trim: drop oldest insertion (dicts preserve order)
+                self._cache.pop(next(iter(self._cache)), None)
+            self._cache[url] = img
+
+    @property
+    def last_call_bytes(self) -> int:
+        """Bytes downloaded during the most recent fetch_images() call."""
+        return self._last_call_bytes
 
     def _track_bytes(self, url: str, nbytes: int):
         domain = urlparse(url).hostname or "unknown"
         with self._bytes_lock:
+            self._last_call_bytes += nbytes
             self._bytes_fetched[domain] = self._bytes_fetched.get(domain, 0) + nbytes
             total = self._bytes_fetched[domain]
             # Warn at 4 GB/hr for rate-limited domains

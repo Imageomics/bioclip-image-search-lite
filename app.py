@@ -93,6 +93,8 @@ class BioCLIPLiteApp:
             timeout=config.image_fetch_timeout,
             max_workers=config.image_fetch_max_workers,
             thumbnail_max_dim=config.thumbnail_max_dim,
+            variant=config.thumbnail_variant,
+            enable_cache=config.enable_image_cache,
         )
         logger.info("All services ready.")
 
@@ -170,23 +172,29 @@ class BioCLIPLiteApp:
         logger.info(f"FAISS+DuckDB returned {len(results)} results, fetching images...")
 
         # Fetch images from URLs
-        results = self.image_service.fetch_images(results)
-
-        ok = sum(1 for r in results if r.get("image_status") == "ok")
+        with phase("image_fetch", n=len(results)) as rec:
+            results = self.image_service.fetch_images(results)
+            ok = sum(
+                1 for r in results
+                if r.get("image_status") in ("ok", "ok_cached")
+            )
+            rec["ok"] = ok
+            rec["bytes"] = self.image_service.last_call_bytes
         logger.info(f"Image fetch complete: {ok}/{len(results)} succeeded")
 
         # Build gallery — pass full-res images so Gradio's lightbox popup
         # shows high quality. Gradio handles grid thumbnail scaling via CSS.
-        gallery_images = []
-        display_metadata = []
-        for r in results:
-            pil_img = r.get("image")
-            if pil_img:
-                gallery_images.append(pil_img)
-            else:
-                label = r.get("species") or r.get("common_name") or "Unknown"
-                gallery_images.append(_placeholder(label))
-            display_metadata.append(r)
+        with phase("gallery_build", n=len(results)):
+            gallery_images = []
+            display_metadata = []
+            for r in results:
+                pil_img = r.get("image")
+                if pil_img:
+                    gallery_images.append(pil_img)
+                else:
+                    label = r.get("species") or r.get("common_name") or "Unknown"
+                    gallery_images.append(_placeholder(label))
+                display_metadata.append(r)
 
         tree = self._generate_tree_summary(display_metadata)
         return gallery_images, tree, display_metadata, cached_embedding, cached_hash
@@ -194,7 +202,13 @@ class BioCLIPLiteApp:
     def on_gallery_select(
         self, evt: gr.SelectData, metadata_list: List[Dict]
     ) -> Tuple[Optional[Image.Image], str, str, str]:
-        """Handle gallery click — show full-res image + metadata.
+        """Handle gallery click — show full-resolution image + metadata.
+
+        Two-tier images: the gallery only fetched a downsized thumbnail
+        (``meta['image']``, e.g. iNat S3 ``medium``). On click we lazily
+        fetch the full-resolution original once per image and cache it on
+        ``meta['image_full']`` so re-clicks are instant. Falls back to the
+        thumbnail if the original can't be fetched.
 
         Returns (image, header_md, taxonomy_md, source_md).
         """
@@ -204,14 +218,19 @@ class BioCLIPLiteApp:
 
         meta = metadata_list[evt.index]
 
-        # Try to show the already-fetched image (or fetch full-res)
-        img = meta.get("image")
+        # Reuse the full-res image if we already fetched it this session.
+        img = meta.get("image_full")
         if img is None:
             url = meta.get("identifier")
             if url:
-                img, status = self.image_service.fetch_full_resolution(url)
-                if img:
-                    meta["image"] = img
+                # fetch_full_resolution() requests the original URL as-stored
+                # (no size rewrite), so this is the true full-res image.
+                with phase("full_res_fetch", idx=evt.index):
+                    img, status = self.image_service.fetch_full_resolution(url)
+                if img is not None:
+                    meta["image_full"] = img
+            if img is None:
+                img = meta.get("image")  # fall back to the medium thumbnail
 
         header, taxonomy, source = self._format_metadata(meta, evt.index + 1)
         return img, header, taxonomy, source
