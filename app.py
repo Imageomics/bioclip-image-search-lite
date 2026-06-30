@@ -114,8 +114,18 @@ class BioCLIPLiteApp:
 
         img_h = _image_hash(img)
         logger.info(f"Image uploaded (hash={img_h[:8]}, size={img.size}), embedding + predicting at rank={rank}")
-        embedding = self.model_service.embed([img], normalize=False)[0].tolist()
-        pred_html = self._predict_html(img, rank)
+        # Single encode: the image features power BOTH the stored search
+        # embedding and the taxonomy prediction (no double forward pass).
+        try:
+            embeddings, preds = self.model_service.embed_and_classify(
+                [img], rank=rank.lower(), k=5
+            )
+            embedding = embeddings[0].tolist()
+            pred_html = self._pred_html(preds[0] if preds else None, rank)
+        except Exception as e:
+            logger.error(f"embed_and_classify failed ({e}); falling back to separate calls")
+            embedding = self.model_service.embed([img], normalize=True)[0].tolist()
+            pred_html = self._predict_html(img, rank)
         return embedding, pred_html, img_h
 
     def search(
@@ -207,11 +217,27 @@ class BioCLIPLiteApp:
         return img, header, taxonomy, source
 
     def predict_on_rank_change(
-        self, img: Optional[Image.Image], rank: str
+        self,
+        img: Optional[Image.Image],
+        embedding: Optional[List[float]],
+        rank: str,
     ) -> str:
-        """Re-predict when user changes taxonomic rank."""
+        """Re-predict when the user changes taxonomic rank.
+
+        Reuses the stored embedding (= normalized image features) so changing
+        rank costs zero image encodes. Falls back to encoding only if no
+        embedding is available yet.
+        """
         if img is None:
             return _prediction_placeholder()
+        if embedding:
+            try:
+                preds = self.model_service.classify_from_embedding(
+                    embedding, rank=rank.lower(), k=5
+                )
+                return self._pred_html(preds[0] if preds else None, rank)
+            except Exception as e:
+                logger.error(f"classify_from_embedding failed ({e}); re-encoding")
         return self._predict_html(img, rank)
 
     def export_results(self, metadata_list: List[Dict]) -> Optional[str]:
@@ -240,15 +266,20 @@ class BioCLIPLiteApp:
     # ------------------------------------------------------------------
 
     def _predict_html(self, img: Image.Image, rank: str, k: int = 5) -> str:
-        """Generate prediction HTML."""
+        """Generate prediction HTML by encoding the image (fallback path)."""
         try:
             preds = self.model_service.predict([img], rank=rank.lower(), k=k)
-            if preds and preds[0]:
-                return _format_predictions(preds[0], rank)
-            return "<p style='color:#f88;'>No predictions returned.</p>"
+            return self._pred_html(preds[0] if preds else None, rank)
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
             return f"<p style='color:#f88;'>Prediction error: {e}</p>"
+
+    @staticmethod
+    def _pred_html(preds_for_image: Optional[List[Dict]], rank: str) -> str:
+        """Format a single image's prediction list into HTML."""
+        if preds_for_image:
+            return _format_predictions(preds_for_image, rank)
+        return "<p style='color:#f88;'>No predictions returned.</p>"
 
     @staticmethod
     def _format_metadata(meta: Dict, rank: int) -> Tuple[str, str, str]:
@@ -493,10 +524,10 @@ class BioCLIPLiteApp:
                 ],
             )
 
-            # Re-predict on rank change
+            # Re-predict on rank change (reuses stored embedding — no encode)
             rank_dropdown.change(
                 self.predict_on_rank_change,
-                inputs=[img, rank_dropdown],
+                inputs=[img, embedding_state, rank_dropdown],
                 outputs=[prediction_output],
             )
 
