@@ -5,6 +5,7 @@ Runs in-process — no Flask wrapper.
 """
 
 import logging
+import threading
 import time
 import functools
 from typing import List, Dict, Any, Optional
@@ -39,6 +40,18 @@ class ModelService:
         self._tol_classifier = None
         self._Rank = None
         self._CustomLabelsClassifier = None
+        # Per-image-hash embedding cache so concurrent upload + search handlers
+        # encode a given image only once (fixes the first-search re-encode race).
+        self._embed_cache: Dict[str, np.ndarray] = {}
+        
+        # Two locks
+        # A dict of locks keyed by image hash. 
+        # Each lock protects the embedding of a single image.
+        self._embed_locks: Dict[str, threading.Lock] = {}
+        # Global lock to protect the cache and the per-hash locks dict.
+        self._embed_meta_lock = threading.Lock()
+        # Limit the cache size to avoid unbounded memory growth. 
+        self._embed_cache_max = 32
         self._load_model()
 
     def _load_model(self):
@@ -53,13 +66,24 @@ class ModelService:
         logger.info(f"Model loaded: {self._tol_classifier.model_str}")
 
     def embed(
-        self, images: List[PIL.Image.Image], normalize: bool = True
+        self,
+        images: List[PIL.Image.Image],
+        normalize: bool = True,
+        image_hash: Optional[str] = None,
     ) -> np.ndarray:
         """Generate embeddings for a list of PIL images.
+
+        If ``image_hash`` is given for a single image, the result is served
+        from (or stored in) a per-hash cache, so concurrent upload + search
+        handlers encode the same image only once. Cached embeddings are always
+        L2-normalized (the ``normalize`` flag applies only to the uncached
+        multi-image path; FAISS re-normalizes the query regardless).
 
         Returns:
             np.ndarray of shape (N, 768).
         """
+        if image_hash is not None and len(images) == 1:
+            return self._embed_cached(images[0], image_hash)
         with phase("embed", n=len(images)):
             rgb_images = [img.convert("RGB") for img in images]
             features = self._tol_classifier.create_image_features(
@@ -67,18 +91,66 @@ class ModelService:
             )
             return features.cpu().numpy()
 
+    def _embed_cached(self, image: PIL.Image.Image, image_hash: str) -> np.ndarray:
+        """Embed one image, computing it at most once per hash even under
+        concurrent callers (per-hash lock + double-checked cache)."""
+        
+        # Check under the global lock
+        with self._embed_meta_lock:
+            # Has the embedding already been computed and cached?
+            hit = self._embed_cache.get(image_hash)
+            if hit is not None:
+                return hit
+            # If not, create or grab the existing per-hash lock for this image hash. 
+            # `.setdefault(key, default)` is atomic under the global lock, so only one thread creates the lock.
+            lock = self._embed_locks.setdefault(image_hash, threading.Lock())
+        
+        # Check under the per-hash lock
+        # If thread is the first to acquire the lock for this image hash, 
+        # it will compute the embedding.
+        # Other threads will wait here until the lock is released.
+        with lock:
+            # Why still use the global lock in here? 
+            # _embed_cache, _embed_locks are protected by the global lock, not by the per-hash lock. 
+            # To avoid racing condition caused by concurrency, 
+            # we need to protect them by the global lock when accessing them.
+                    
+            # Check again under the global lock
+            # Another thread may have computed it while we waited for the lock.
+            with self._embed_meta_lock:
+                hit = self._embed_cache.get(image_hash)
+            if hit is not None:
+                return hit
+            
+            # Compute the embedding for this image
+            with phase("embed", n=1):
+                features = self._tol_classifier.create_image_features(
+                    [image.convert("RGB")], normalize=True
+                )
+                emb = features.cpu().numpy()
+            
+            # Store the computed embedding in the cache under the global lock
+            with self._embed_meta_lock:
+                self._embed_cache[image_hash] = emb
+                if len(self._embed_cache) > self._embed_cache_max:
+                    oldest = next(iter(self._embed_cache))
+                    self._embed_cache.pop(oldest, None)
+                    self._embed_locks.pop(oldest, None)
+            return emb
+
     def embed_and_classify(
         self,
         images: List[PIL.Image.Image],
         rank: str = "species",
         k: int = 5,
+        image_hash: Optional[str] = None,
     ) -> tuple:
         """Encode images ONCE, return (embeddings, grouped_predictions).
 
-        Equivalent to calling :meth:`embed` then :meth:`predict`, but runs the
-        visual tower a single time and reuses the resulting features for both
-        the search embedding and the taxonomy classification — avoiding the
-        double forward pass that dominates first-upload latency.
+        The embedding feeds both the search query and the taxonomy prediction,
+        so the visual tower runs a single time. Pass ``image_hash`` to share
+        that encode with a concurrent search via the per-hash cache (see
+        :meth:`embed`) — this is what prevents the first-search re-encode.
 
         Mirrors ``TreeOfLifeClassifier.predict`` via the public-but-internal
         ``create_image_features`` + ``create_probabilities`` + ``format_*``
@@ -89,14 +161,9 @@ class ModelService:
             (np.ndarray (N, 768) normalized embeddings,
              list of per-image prediction lists)
         """
-        rgb_images = [img.convert("RGB") for img in images]
-        with phase("embed", n=len(images)):
-            with torch.no_grad():
-                feats = self._tol_classifier.create_image_features(
-                    rgb_images, normalize=True
-                )
-        preds = self._classify_from_features(feats, rank, k)
-        return feats.detach().cpu().numpy(), preds
+        emb = self.embed(images, normalize=True, image_hash=image_hash)
+        preds = self.classify_from_embedding(emb, rank=rank, k=k)
+        return emb, preds
 
     def classify_from_embedding(
         self,

@@ -120,7 +120,7 @@ class BioCLIPLiteApp:
         # embedding and the taxonomy prediction (no double forward pass).
         try:
             embeddings, preds = self.model_service.embed_and_classify(
-                [img], rank=rank.lower(), k=5
+                [img], rank=rank.lower(), k=5, image_hash=img_h
             )
             embedding = embeddings[0].tolist()
             pred_html = self._pred_html(preds[0] if preds else None)
@@ -153,7 +153,9 @@ class BioCLIPLiteApp:
             query_vector = np.array(cached_embedding, dtype="float32")
             logger.info("Reusing cached embedding")
         else:
-            query_vector = self.model_service.embed([img], normalize=False)[0]
+            # Hash-keyed encode: shares the upload handler's in-flight embedding
+            # instead of re-encoding when search races ahead of it.
+            query_vector = self.model_service.embed([img], image_hash=current_hash)[0]
             cached_embedding = query_vector.tolist()
             cached_hash = current_hash
 
