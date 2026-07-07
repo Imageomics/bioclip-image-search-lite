@@ -154,7 +154,7 @@ The key distinction: **AWS Open Data S3 URLs are not subject to iNaturalist rate
 
 Compliance measures in [`image_service.py`](src/bioclip_lite/services/image_service.py):
 
-- **User-Agent**: Identifies us as `BioCLIP-Lite/1.0 (academic research; imageomics.org)`
+- **User-Agent**: Identifies the software as `bioclip-image-search-lite/<version> (+https://github.com/Imageomics/bioclip-image-search-lite)`, following the `name/version (+URL)` convention used by major crawlers ([Googlebot](https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers) is the canonical example).
 - **Per-domain rate limiting**: Token bucket (1 req/sec) for `static.inaturalist.org`. S3 Open Data URLs are fetched in parallel without throttling.
 - **Bandwidth tracking**: Logs cumulative bytes per domain per session, warns at 4 GB/hr for rate-limited domains
 - **Sequential CDN fetching**: Rate-limited URLs are fetched one at a time, never in parallel
