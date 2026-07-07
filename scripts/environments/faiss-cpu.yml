@@ -1,0 +1,24 @@
+# Build-pipeline environment for CPU-only machines (small datasets,
+# local development, or just running phases 01, 05, 06, 07 which don't
+# need a GPU). Phases 03 and 04 will work but be much slower than the
+# faiss-gpu-cuvs env.
+#
+# Create with:
+#   conda env create -f scripts/environments/faiss-cpu.yml
+#   conda activate bioclip-lite-build-cpu
+name: bioclip-lite-build-cpu
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - faiss-cpu>=1.8
+  - pyarrow
+  - duckdb
+  - polars
+  - omegaconf
+  - pydantic>=2
+  - pip
+  - pip:
+      - pyspark>=3.5  # required only when sample.engine == "spark"

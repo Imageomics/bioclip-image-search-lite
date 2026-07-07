@@ -1,0 +1,29 @@
+# Build-pipeline environment with GPU-accelerated FAISS via cuVS.
+# faiss-gpu-cuvs is conda-only (not on PyPI); use this env for phases
+# 02 (sample, when engine is duckdb), 03 (train_leader), and 04 (build_shards).
+#
+# Channel order matters.
+#
+# Create with:
+#   conda env create -f scripts/environments/faiss-gpu-cuvs.yml
+#   conda activate bioclip-lite-build
+name: bioclip-lite-build
+
+channels:
+  - pytorch
+  - nvidia
+  - rapidsai
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - faiss-gpu-cuvs=1.14.1
+  - libnvjitlink
+  - pyarrow
+  - duckdb
+  - polars
+  - omegaconf
+  - pydantic>=2
+  - pip
+  - pip:
+      - pyspark>=3.5  # required only when sample.engine == "spark"

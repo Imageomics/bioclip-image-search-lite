@@ -1,0 +1,183 @@
+# scripts/config_example.yaml
+#
+# Self-documenting config for the bioclip-image-search-lite index-build pipeline.
+# Read top to bottom and you walk through the workflow:
+#   01 manifest -> 02 sample -> 03 train_leader -> 04 build_shards
+#   -> 05 merge -> 06 build_duckdb -> 07 verify_alignment
+#
+# Each phase reads from disk and writes to disk; you can rerun any phase in
+# isolation. All paths under ${output.workdir} are managed by the pipeline.
+#
+# Field tags:
+#   (required)            you must provide a value
+#   (optional, default X) you may omit; the loader fills in X
+#
+# Cluster-specific environment activation (conda activate, module load, ...)
+# lives outside this config. Set the ENV_SETUP env var to a shell script that
+# activates the right Python before invoking scripts/slurm/submit_pipeline.sh
+# or scripts/run_local.sh. See scripts/environments/env_setup_example.sh.
+#
+# For deeper background on why specific defaults were chosen (nlist, sample
+# size, sort order, ENUM caps, etc.) see scripts/README.md.
+
+input:
+  # (required) glob or path to one or more embedding parquet files.
+  # Required schema: uuid:string, emb:list<float32 or float16>[D], plus the
+  # column named in sample.stratify_col. Float16 is auto-cast to float32.
+  embeddings_parquet: "/data/embeddings/*.parquet"
+
+  # (required) per-row metadata used to build the DuckDB lookup.
+  # Required schema: uuid:string, plus any columns you want addressable at
+  # search time. Catalog is inner-joined against the FAISS uuid->id mapping
+  # at phase 06; rows without an embedding are dropped.
+  catalog_parquet: "/data/catalog.parquet"
+
+  # (required) vector dimensionality. Must match index.factory's expectation.
+  embedding_dim: 768
+
+  # (optional, default "uuid")
+  uuid_col: uuid
+
+  # (optional, default "emb")
+  embedding_col: emb
+
+output:
+  # (required) all phase outputs land here. Re-running a phase overwrites
+  # only its own outputs.
+  workdir: "/work/lite_index"
+
+  # (optional, default "${output.workdir}/index.index")
+  index_path:  "${output.workdir}/index.index"
+
+  # (optional, default "${output.workdir}/metadata.duckdb")
+  duckdb_path: "${output.workdir}/metadata.duckdb"
+
+# Phase 02: stratified sampling for leader index training.
+# Picks roughly n_total vectors stratified on stratify_col so every class is
+# fairly represented. The sample trains the IVF centroids and PQ codebooks in
+# phase 03; it does NOT determine what ends up in the final index (every
+# input vector is added in phase 04).
+sample:
+  # (required) target sample size for training the IVF centroids and PQ
+  # codebooks. Rule of thumb: ~256 * nlist for good clustering.
+  # See "Choosing sample.n_total" in scripts/README.md for how to size this
+  # for your nlist.
+  n_total: 15_000_000
+
+  # (required) any column in input.embeddings_parquet that defines a
+  # taxonomic or categorical grouping. The sampler picks fairly from each
+  # group via water-filling.
+  stratify_col: class
+
+  # (optional, default "spark") "spark" runs on a Spark cluster (used for
+  # large datasets on HPC). "duckdb" runs single-node (works to ~100M rows,
+  # no extra services). Output schema is identical for both samplers.
+  engine: spark
+
+  # (optional, default 42)
+  seed: 42
+
+  # (optional, default 1) classes with fewer rows than this are kept whole
+  # without subsampling.
+  min_per_class: 1
+
+# Phases 03+04+05: FAISS index construction.
+# Use the FAISS factory string for terseness. When l2_normalize is true the
+# pipeline normalizes vectors at read time in both phase 03 (training) and
+# phase 04 (shard build), so embeddings on disk can be raw model outputs
+# (already-normalized embeddings work too; L2 normalization is idempotent).
+index:
+  # (optional, default "IVF65536,PQ16") FAISS factory string.
+  # IVF65536 = 65,536 cells; PQ16 = 16-byte product quantized codes.
+  # See "Choosing index.factory" in scripts/README.md.
+  factory: "IVF65536,PQ16"
+
+  # (optional, default "inner_product") inner product on L2-normalized
+  # vectors equals cosine similarity. Most CLIP-family models work this way.
+  metric: "inner_product"
+
+  # (optional, default true)
+  l2_normalize: true
+
+# Phase 04: parallel shard build. Each worker loads the leader from phase 03,
+# encodes its slice of vectors, writes shards/shard_NNNNN.index. Phase 05
+# then merges the shards into the final index.
+shards:
+  # (optional, default 1) number of parallel encode workers.
+  # Set to your available GPU count; n_shards: 1 is a single-GPU run.
+  n_shards: 8
+
+  # (optional, default 3_000_000) vectors per encode batch. Higher uses more
+  # VRAM; 3M fits comfortably on an 80 GB H100 at fp32.
+  batch_size: 3_000_000
+
+# Phase 06: build the DuckDB metadata lookup.
+duckdb:
+  # (optional, default {}) per-column ENUM cardinality cap.
+  # ENUMs save space on low-cardinality columns by storing small integer
+  # codes instead of repeated strings. The cap is a safety guard: if a column
+  # has more than N distinct values, it falls back to VARCHAR (avoids
+  # creating a multi-MB ENUM type definition for an unexpectedly
+  # high-cardinality column). Tune per column based on what you know about
+  # your data. Empty dict means no ENUMs are applied.
+  enum_cardinality_caps:
+    source_dataset: 10
+    kingdom: 50
+    phylum: 200
+    class: 500
+    order: 2000
+    family: 15_000
+    publisher: 2000
+    img_type: 20
+    basisOfRecord: 20
+
+  # (optional, default null) if your catalog has a full URL column, naming
+  # it here splits it into url_prefix_id (foreign key into a deduplicated
+  # url_prefixes table) and identifier_suffix (the path after the domain).
+  # Saves ~40% on URL storage. Set to null to skip.
+  url_column: source_url
+
+  # (required) row sort order on disk. The biggest knob for compression
+  # efficiency: adjacent rows that share long string prefixes compress
+  # dramatically better. Pick a key that puts similar rows together.
+  # In our build this cut DuckDB from 27 GB to 14 GB.
+  sort_by: [source_dataset, kingdom, phylum, class, order, family, common_name]
+
+  # (optional, default []) catalog columns to drop from the metadata table.
+  # Use this to keep internal columns (HPC paths, debugging fields, etc.)
+  # out of the public artifact. Each excluded column saves
+  # avg_string_length * row_count bytes; long path columns at 200M+ rows
+  # can shave many GB off the output.
+  exclude_cols: []
+
+# Phase 07: alignment verification. Hard-fails on any mismatch.
+verify:
+  # (optional, default 200) how many random uuids to round-trip
+  # (look up the embedding, search FAISS, look up the returned id in DuckDB,
+  # confirm the uuid matches).
+  n_roundtrip_samples: 200
+
+# (optional) SLURM resource hints. Consumed only by
+# scripts/slurm/submit_pipeline.sh; the local runner ignores this section.
+# All keys here are optional with reasonable defaults; override per-cluster.
+# Memory budgets are sized to the hugemem-class node we used for the
+# production TOL-200M build (most phases use far less; see README); walltimes
+# carry roughly 5x margin over measured wall clock so a slow cluster or a
+# slightly larger dataset does not get killed mid-phase. See "Resource
+# expectations" in scripts/README.md for measured numbers and tuning guidance.
+resources:
+  # Walltimes are ~5x the production TOL-200M measurements (see README's
+  # "Resource expectations"); raise `shards.walltime` if you reduce
+  # `shards.n_shards` below 8 (single-GPU runs encode ~50 min for 233M).
+  # Partitions below (cpu / gpu / hugemem) reflect what the production build
+  # used; rename to match your cluster's partition names. Replace
+  # `<your-account>` with your SLURM account; if you prefer to set it once
+  # outside the config, omit the `account` field and export SBATCH_ACCOUNT in
+  # the shell that calls submit_pipeline.sh.
+  manifest:     {account: "<your-account>", partition: "cpu",     cpu: 8,  mem: "64G",  walltime: "00:15:00"}
+  sample:       {account: "<your-account>", partition: "cpu",     cpu: 16, mem: "200G", walltime: "00:30:00"}
+  train_leader: {account: "<your-account>", partition: "gpu",     cpu: 16, mem: "200G", walltime: "00:30:00", gpu: 1}
+  shards:       {account: "<your-account>", partition: "gpu",     cpu: 16, mem: "100G", walltime: "01:00:00", gpu: 1, array_size: 8}
+  merge:        {account: "<your-account>", partition: "cpu",     cpu: 32, mem: "64G",  walltime: "00:15:00"}
+  duckdb:       {account: "<your-account>", partition: "hugemem", cpu: 16, mem: "884G", walltime: "00:30:00"}
+  verify:       {account: "<your-account>", partition: "cpu",     cpu: 8,  mem: "32G",  walltime: "00:15:00"}
