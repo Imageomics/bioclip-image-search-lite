@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bioclip-image-search-lite"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Lightweight BioCLIP image search using source URLs, FAISS, and DuckDB"
 requires-python = ">=3.10"
 dependencies = [
@@ -22,6 +22,10 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["faiss-gpu-cu12"]
 dev = ["pytest", "black", "isort"]
+
+
+[tool.hatch.version]
+path = "src/bioclip_lite/__about__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bioclip_lite"]

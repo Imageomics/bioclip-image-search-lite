@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 import requests
 from PIL import Image
 
+from .. import __about__
+
 logger = logging.getLogger(__name__)
 
 # iNaturalist AWS Open Data bucket — 59% of our URLs. Serves size variants
@@ -44,7 +46,14 @@ RATE_LIMITED_DOMAINS = frozenset({
     "static.inaturalist.org",
 })
 
-USER_AGENT = "BioCLIP-Lite/1.0 (academic research; imageomics.org)"
+# User-Agent components. Version is the canonical source from __about__.py;
+# name and URL are bound here since they are UA-specific. Format follows the
+# name/version (+URL) convention used by Googlebot and other major crawlers.
+PRODUCT_NAME = "bioclip-image-search-lite"
+PRODUCT_VERSION = __about__.__version__
+PRODUCT_URL = "https://github.com/Imageomics/bioclip-image-search-lite"
+
+USER_AGENT = f"{PRODUCT_NAME}/{PRODUCT_VERSION} (+{PRODUCT_URL})"
 
 
 class _TokenBucket:
