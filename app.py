@@ -185,8 +185,8 @@ class BioCLIPLiteApp:
             rec["bytes"] = fetch_bytes
         logger.info(f"Image fetch complete: {ok}/{len(results)} succeeded")
 
-        # Build gallery — pass full-res images so Gradio's lightbox popup
-        # shows high quality. Gradio handles grid thumbnail scaling via CSS.
+        # Build gallery from the medium thumbnails fetched above; the
+        # full-resolution original is fetched lazily on click (on_gallery_select).
         with phase("gallery_build", n=len(results)):
             gallery_images = []
             display_metadata = []

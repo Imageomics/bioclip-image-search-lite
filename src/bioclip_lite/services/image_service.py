@@ -109,8 +109,10 @@ class ImageService:
         self._cache_bytes = 0                        # running total of cached bytes
         self._cache_max_bytes = cache_max_bytes
         # Admission cap: never cache a single object above this, so one oversized
-        # (non-iNat, un-rewritten) gallery image can't dominate the pool.
-        self._cache_max_item_bytes = 4 * 1024 * 1024
+        # (non-iNat, un-rewritten) gallery image can't dominate the pool. Capped
+        # at the total budget so a single admitted item can never exceed it
+        # (keeps the byte bound intact even for very small budgets).
+        self._cache_max_item_bytes = min(4 * 1024 * 1024, cache_max_bytes)
 
         # Rate limiter for iNat CDN domains (1 req/sec)
         self._cdn_limiter = _TokenBucket(rate=1.0)
