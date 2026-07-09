@@ -52,6 +52,8 @@ class LiteConfig:
     thumbnail_variant: Optional[str] = "medium"
     # Shared process-level image cache (caches hits + permanent misses).
     enable_image_cache: bool = True
+    # Thumbnail cache budget in MB (byte-bounded LRU). Full-res bypasses it.
+    image_cache_max_mb: int = 512
 
     # Metadata columns to SELECT from optimized DB.
     # URL is split into url_prefix_id + identifier_suffix; reconstructed in Python.
@@ -177,6 +179,10 @@ def parse_args() -> LiteConfig:
              "--no-image-cache to disable).",
     )
     p.add_argument(
+        "--image-cache-mb", type=int, default=_d.image_cache_max_mb,
+        help=f"Thumbnail cache budget in MB, byte-bounded LRU (default: {_d.image_cache_max_mb}).",
+    )
+    p.add_argument(
         "--log-dir", default=None,
         help="Directory for log files. If set, writes DEBUG-level logs to a timestamped file.",
     )
@@ -198,6 +204,7 @@ def parse_args() -> LiteConfig:
         log_level=args.log_level,
         thumbnail_variant=args.thumbnail_variant,
         enable_image_cache=args.image_cache,
+        image_cache_max_mb=args.image_cache_mb,
     )
     if args.model_str:
         cfg.model_str = args.model_str

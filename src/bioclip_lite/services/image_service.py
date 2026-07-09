@@ -14,6 +14,7 @@ import logging
 import re
 import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -88,7 +89,7 @@ class ImageService:
         thumbnail_max_dim: int = 256,
         variant: Optional[str] = None,
         enable_cache: bool = False,
-        cache_max: int = 512,
+        cache_max_bytes: int = 512 * 1024 * 1024,
     ):
         self.timeout = timeout
         self.max_workers = max_workers
@@ -98,13 +99,18 @@ class ImageService:
         # i.e. whatever the DB stored, usually 'original'). See INAT_S3_VARIANTS.
         self.variant = variant
 
-        # Optional process-level image cache (url -> PIL.Image | None).
-        # Off by default to preserve current behavior; the latency benchmark
-        # flips it on to measure warm-cache searches.
+        # Byte-bounded LRU thumbnail cache (url -> PIL.Image | None). Bounded by
+        # total decoded bytes, not entry count, so memory stays predictable on a
+        # fixed budget. Full-resolution images bypass this cache entirely (see
+        # _fetch_single(use_cache=...)); per-session gr.State handles re-clicks.
         self.enable_cache = enable_cache
-        self._cache_max = cache_max
-        self._cache: Dict[str, Optional[Image.Image]] = {}
+        self._cache: "OrderedDict[str, Optional[Image.Image]]" = OrderedDict()
         self._cache_lock = threading.Lock()
+        self._cache_bytes = 0                        # running total of cached bytes
+        self._cache_max_bytes = cache_max_bytes
+        # Admission cap: never cache a single object above this, so one oversized
+        # (non-iNat, un-rewritten) gallery image can't dominate the pool.
+        self._cache_max_item_bytes = 4 * 1024 * 1024
 
         # Rate limiter for iNat CDN domains (1 req/sec)
         self._cdn_limiter = _TokenBucket(rate=1.0)
@@ -208,19 +214,24 @@ class ImageService:
         return metadata_list, call_bytes
 
     def _fetch_single(
-        self, url: Optional[str]
+        self, url: Optional[str], use_cache: bool = True
     ) -> Tuple[Optional[Image.Image], str, int]:
         """Fetch one image. Returns (PIL Image or None, status, bytes_downloaded).
 
         ``bytes_downloaded`` is 0 for cache hits, no-URL, and every failure
         path — only a successful network fetch reports its payload size. The
         caller accumulates it locally, so there is no shared per-call counter.
+
+        ``use_cache=False`` bypasses both the cache lookup and the writes —
+        used by the full-resolution click path so large originals never enter
+        the thumbnail pool.
         """
         if not url:
             return None, "no_url", 0
 
+        cache = self.enable_cache and use_cache
         # Cache lookup (cached hits cost zero bytes — this is the warm path)
-        if self.enable_cache:
+        if cache:
             hit = self._cache_get(url)
             if hit is not _CACHE_MISS:
                 return hit, ("ok_cached" if hit is not None else "cached_fail"), 0
@@ -235,14 +246,15 @@ class ImageService:
                 self._track_bytes(url, nbytes)
                 img = Image.open(io.BytesIO(resp.content)).convert("RGB")
                 logger.debug(f"OK {domain} {nbytes/1024:.0f}KB {dt:.2f}s")
-                self._cache_put(url, img)
+                if cache:
+                    self._cache_put(url, img)
                 return img, "ok", nbytes
             elif resp.status_code == 429:
                 logger.warning(f"Rate limited (429) from {domain} after {dt:.2f}s")
                 return None, "rate_limited", 0  # transient — do not cache
             else:
                 logger.debug(f"HTTP {resp.status_code} from {domain} after {dt:.2f}s")
-                if 400 <= resp.status_code < 500:
+                if cache and 400 <= resp.status_code < 500:
                     self._cache_put(url, None)  # permanent miss — cache it
                 return None, f"http_{resp.status_code}", 0
         except requests.Timeout:
@@ -253,13 +265,18 @@ class ImageService:
             return None, f"error:{str(e)[:80]}", 0
 
     def fetch_full_resolution(self, url: Optional[str]) -> Tuple[Optional[Image.Image], str]:
-        """Fetch a single image at full resolution (for on-click detail view)."""
+        """Fetch a single image at full resolution (for on-click detail view).
+
+        Bypasses the thumbnail cache (``use_cache=False``): originals are large
+        and would evict thumbnails; per-session gr.State already makes re-clicks
+        of the same result instant.
+        """
         if not url:
             return None, "no_url"
         domain = urlparse(url).hostname or ""
         if domain in RATE_LIMITED_DOMAINS:
             self._cdn_limiter.acquire()
-        img, status, _ = self._fetch_single(url)
+        img, status, _ = self._fetch_single(url, use_cache=False)
         return img, status
 
     def make_thumbnail(self, img: Image.Image) -> Image.Image:
@@ -287,18 +304,39 @@ class ImageService:
         return f"{head}{self.variant}{ext}{qs or ''}"
 
     # ------------------------------------------------------------------
-    # Image cache (process-level, bounded, thread-safe). Caches misses too.
+    # Byte-bounded LRU image cache (process-level, thread-safe). Caches
+    # misses too. Bounded by total decoded bytes; evicts least-recently-used.
     # ------------------------------------------------------------------
+    @staticmethod
+    def _weight(img: Optional[Image.Image]) -> int:
+        """Approximate decoded RAM footprint of a cache entry, in bytes."""
+        if img is None:
+            return 64  # nominal cost for a cached negative (miss) entry
+        w, h = img.size
+        return w * h * len(img.getbands())
+
     def _cache_get(self, url: str):
         with self._cache_lock:
-            return self._cache.get(url, _CACHE_MISS)
+            if url not in self._cache:
+                return _CACHE_MISS
+            self._cache.move_to_end(url)          # LRU: mark most-recently used
+            return self._cache[url]
 
     def _cache_put(self, url: str, img: Optional[Image.Image]):
+        size = self._weight(img)
+        if size > self._cache_max_item_bytes:
+            return  # admission control: too large for the thumbnail pool
         with self._cache_lock:
-            if url not in self._cache and len(self._cache) >= self._cache_max:
-                # FIFO trim: drop oldest insertion (dicts preserve order)
-                self._cache.pop(next(iter(self._cache)), None)
+            if url in self._cache:
+                self._cache_bytes -= self._weight(self._cache[url])
+                self._cache.pop(url)
             self._cache[url] = img
+            self._cache.move_to_end(url)
+            self._cache_bytes += size
+            # Evict least-recently-used entries until back under budget.
+            while self._cache_bytes > self._cache_max_bytes and len(self._cache) > 1:
+                _, victim = self._cache.popitem(last=False)
+                self._cache_bytes -= self._weight(victim)
 
     def _track_bytes(self, url: str, nbytes: int):
         """Accumulate cumulative per-domain bytes for the bandwidth watchdog."""

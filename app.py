@@ -95,6 +95,7 @@ class BioCLIPLiteApp:
             thumbnail_max_dim=config.thumbnail_max_dim,
             variant=config.thumbnail_variant,
             enable_cache=config.enable_image_cache,
+            cache_max_bytes=config.image_cache_max_mb * 1024 * 1024,
         )
         logger.info("All services ready.")
 
