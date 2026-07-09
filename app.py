@@ -11,6 +11,7 @@ Usage:
         --scope all
 """
 
+import csv
 import hashlib
 import io
 import logging
@@ -39,6 +40,18 @@ CSS = """
 """
 
 SCOPE_CHOICES = ["All Sources", "URL-Available Only", "iNaturalist Only", "BioCLIP 2 Training"]
+
+# Columns written to the results-metadata CSV export, in order. The source
+# result dict stores the reconstructed source URL under "identifier"; it is
+# emitted as "image_url" here. Runtime-only fields (image, image_status), the
+# internal FAISS id, and has_url are intentionally excluded.
+EXPORT_COLUMNS = [
+    "uuid", "image_url", "distance",
+    "kingdom", "phylum", "class", "order", "family", "genus", "species",
+    "common_name",
+    "source_dataset", "source_id", "publisher", "basisOfRecord", "img_type",
+    "in_bioclip2_training",
+]
 
 
 def _image_hash(img: Image.Image) -> str:
@@ -207,6 +220,48 @@ class BioCLIPLiteApp:
         if img is None:
             return _prediction_placeholder()
         return self._predict_html(img, rank)
+
+    def export_csv(self, metadata_list: List[Dict]) -> Optional[str]:
+        """Write the current results' tabular metadata to a CSV temp file.
+
+        Returns the file path (served by the download button) or None when
+        there are no results (the button is disabled in that case anyway).
+        """
+        if not metadata_list:
+            return None
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", prefix=f"bioclip_search_results_{ts}_",
+                delete=False, newline="", encoding="utf-8",
+            )
+            writer = csv.DictWriter(tmp, fieldnames=EXPORT_COLUMNS)
+            writer.writeheader()
+            for m in metadata_list:
+                row = {col: m.get(col) for col in EXPORT_COLUMNS}
+                # DuckDB stores the URL split (url_prefix_id + identifier_suffix);
+                # SearchService reconstructs the full URL as "identifier".
+                row["image_url"] = m.get("identifier")
+                writer.writerow(row)
+            tmp.close()
+            logger.info(f"Exported {len(metadata_list)} rows to {tmp.name}")
+            return tmp.name
+        except Exception as e:
+            logger.error(f"CSV export failed: {e}")
+            return None
+
+    def _prepare_export(self, metadata_list: List[Dict]):
+        """Build the CSV for the CURRENT results and load it into the download
+        button, so a click downloads exactly the most recent search.
+
+        Generating eagerly here (rather than on the button's own click) avoids
+        gr.DownloadButton's one-interaction lag, where a click serves the file
+        prepared by the previous interaction.
+        """
+        if not metadata_list:
+            return gr.update(value=None, interactive=False)
+        path = self.export_csv(metadata_list)
+        return gr.update(value=path, interactive=bool(path))
 
     def export_results(self, metadata_list: List[Dict]) -> Optional[str]:
         """Export current results as a zip file."""
@@ -388,6 +443,14 @@ class BioCLIPLiteApp:
                         label="Top N Results",
                     )
                     run_btn = gr.Button("Search", variant="primary")
+                    # CSV metadata export — always visible; the CSV is built
+                    # per-search and loaded into this button (see _prepare_export),
+                    # so it stays disabled until a search returns results.
+                    export_csv_btn = gr.DownloadButton(
+                        "Export Result Metadata",
+                        variant="secondary",
+                        interactive=False,
+                    )
                     export_btn = gr.Button(
                         "Export Results", variant="secondary",
                         visible=self.config.enable_export,
@@ -485,6 +548,13 @@ class BioCLIPLiteApp:
                     gallery, tree_summary, metadata_state,
                     embedding_state, hash_state,
                 ],
+            ).then(
+                # Build the CSV for THIS search and load it into the download
+                # button, so a click always downloads the most recent results
+                # (no gr.DownloadButton one-interaction lag).
+                self._prepare_export,
+                inputs=[metadata_state],
+                outputs=[export_csv_btn],
             )
 
             # Re-predict on rank change
