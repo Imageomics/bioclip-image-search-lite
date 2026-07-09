@@ -106,9 +106,6 @@ class ImageService:
         self._cache: Dict[str, Optional[Image.Image]] = {}
         self._cache_lock = threading.Lock()
 
-        # Bytes downloaded during the most recent fetch_images() call.
-        self._last_call_bytes = 0
-
         # Rate limiter for iNat CDN domains (1 req/sec)
         self._cdn_limiter = _TokenBucket(rate=1.0)
 
@@ -127,14 +124,18 @@ class ImageService:
         self._bytes_lock = threading.Lock()
         self._bytes_fetched: Dict[str, int] = {}
 
-    def fetch_images(self, metadata_list: List[Dict]) -> List[Dict]:
+    def fetch_images(self, metadata_list: List[Dict]) -> Tuple[List[Dict], int]:
         """Fetch images for search results in parallel (respecting rate limits).
 
-        Modifies each dict in-place, adding 'image' (PIL.Image or None)
-        and 'image_status' fields.
+        Modifies each dict in-place, adding 'image' (PIL.Image or None) and
+        'image_status' fields.
+
+        Returns (metadata_list, bytes_downloaded). The byte count is
+        accumulated in a local, so concurrent fetch_images() calls don't
+        clobber each other's totals.
         """
         t0 = time.monotonic()
-        self._last_call_bytes = 0  # reset per-call byte counter
+        call_bytes = 0  # per-call byte total (local, not shared instance state)
 
         # Partition into rate-limited vs unrestricted
         rate_limited_indices = []
@@ -173,9 +174,10 @@ class ImageService:
                 for future in as_completed(futures):
                     idx = futures[future]
                     try:
-                        img, status = future.result()
+                        img, status, nbytes = future.result()
                     except Exception as e:
-                        img, status = None, f"error:{e}"
+                        img, status, nbytes = None, f"error:{e}", 0
+                    call_bytes += nbytes
                     metadata_list[idx]["image"] = img
                     metadata_list[idx]["image_status"] = status
 
@@ -183,11 +185,12 @@ class ImageService:
         for i in rate_limited_indices:
             self._cdn_limiter.acquire()
             try:
-                img, status = self._fetch_single(
+                img, status, nbytes = self._fetch_single(
                     self.rewrite_variant(metadata_list[i].get("identifier"))
                 )
             except Exception as e:
-                img, status = None, f"error:{e}"
+                img, status, nbytes = None, f"error:{e}", 0
+            call_bytes += nbytes
             metadata_list[i]["image"] = img
             metadata_list[i]["image_status"] = status
 
@@ -200,20 +203,27 @@ class ImageService:
             f"Fetched {len(metadata_list)} images in {dt:.2f}s "
             f"(ok={ok}, cached={cached}, no_url={no_url}, "
             f"failed={len(metadata_list) - ok - no_url}, "
-            f"{self._last_call_bytes / 1024:.0f}KB)"
+            f"{call_bytes / 1024:.0f}KB)"
         )
-        return metadata_list
+        return metadata_list, call_bytes
 
-    def _fetch_single(self, url: Optional[str]) -> Tuple[Optional[Image.Image], str]:
-        """Fetch one image. Returns (PIL Image or None, status string)."""
+    def _fetch_single(
+        self, url: Optional[str]
+    ) -> Tuple[Optional[Image.Image], str, int]:
+        """Fetch one image. Returns (PIL Image or None, status, bytes_downloaded).
+
+        ``bytes_downloaded`` is 0 for cache hits, no-URL, and every failure
+        path — only a successful network fetch reports its payload size. The
+        caller accumulates it locally, so there is no shared per-call counter.
+        """
         if not url:
-            return None, "no_url"
+            return None, "no_url", 0
 
         # Cache lookup (cached hits cost zero bytes — this is the warm path)
         if self.enable_cache:
             hit = self._cache_get(url)
             if hit is not _CACHE_MISS:
-                return hit, "ok_cached" if hit is not None else "cached_fail"
+                return hit, ("ok_cached" if hit is not None else "cached_fail"), 0
 
         domain = urlparse(url).hostname or "?"
         t0 = time.monotonic()
@@ -221,25 +231,26 @@ class ImageService:
             resp = self.session.get(url, timeout=self.timeout)
             dt = time.monotonic() - t0
             if resp.status_code == 200:
-                self._track_bytes(url, len(resp.content))
+                nbytes = len(resp.content)
+                self._track_bytes(url, nbytes)
                 img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-                logger.debug(f"OK {domain} {len(resp.content)/1024:.0f}KB {dt:.2f}s")
+                logger.debug(f"OK {domain} {nbytes/1024:.0f}KB {dt:.2f}s")
                 self._cache_put(url, img)
-                return img, "ok"
+                return img, "ok", nbytes
             elif resp.status_code == 429:
                 logger.warning(f"Rate limited (429) from {domain} after {dt:.2f}s")
-                return None, "rate_limited"  # transient — do not cache
+                return None, "rate_limited", 0  # transient — do not cache
             else:
                 logger.debug(f"HTTP {resp.status_code} from {domain} after {dt:.2f}s")
                 if 400 <= resp.status_code < 500:
                     self._cache_put(url, None)  # permanent miss — cache it
-                return None, f"http_{resp.status_code}"
+                return None, f"http_{resp.status_code}", 0
         except requests.Timeout:
             logger.debug(f"Timeout from {domain} after {self.timeout}s")
-            return None, "timeout"  # transient — do not cache
+            return None, "timeout", 0  # transient — do not cache
         except Exception as e:
             logger.debug(f"Error from {domain}: {e}")
-            return None, f"error:{str(e)[:80]}"
+            return None, f"error:{str(e)[:80]}", 0
 
     def fetch_full_resolution(self, url: Optional[str]) -> Tuple[Optional[Image.Image], str]:
         """Fetch a single image at full resolution (for on-click detail view)."""
@@ -248,7 +259,8 @@ class ImageService:
         domain = urlparse(url).hostname or ""
         if domain in RATE_LIMITED_DOMAINS:
             self._cdn_limiter.acquire()
-        return self._fetch_single(url)
+        img, status, _ = self._fetch_single(url)
+        return img, status
 
     def make_thumbnail(self, img: Image.Image) -> Image.Image:
         """Resize to thumbnail for gallery display."""
@@ -288,15 +300,10 @@ class ImageService:
                 self._cache.pop(next(iter(self._cache)), None)
             self._cache[url] = img
 
-    @property
-    def last_call_bytes(self) -> int:
-        """Bytes downloaded during the most recent fetch_images() call."""
-        return self._last_call_bytes
-
     def _track_bytes(self, url: str, nbytes: int):
+        """Accumulate cumulative per-domain bytes for the bandwidth watchdog."""
         domain = urlparse(url).hostname or "unknown"
         with self._bytes_lock:
-            self._last_call_bytes += nbytes
             self._bytes_fetched[domain] = self._bytes_fetched.get(domain, 0) + nbytes
             total = self._bytes_fetched[domain]
             # Warn at 4 GB/hr for rate-limited domains

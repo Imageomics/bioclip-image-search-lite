@@ -175,13 +175,13 @@ class BioCLIPLiteApp:
 
         # Fetch images from URLs
         with phase("image_fetch", n=len(results)) as rec:
-            results = self.image_service.fetch_images(results)
+            results, fetch_bytes = self.image_service.fetch_images(results)
             ok = sum(
                 1 for r in results
                 if r.get("image_status") in ("ok", "ok_cached")
             )
             rec["ok"] = ok
-            rec["bytes"] = self.image_service.last_call_bytes
+            rec["bytes"] = fetch_bytes
         logger.info(f"Image fetch complete: {ok}/{len(results)} succeeded")
 
         # Build gallery — pass full-res images so Gradio's lightbox popup
