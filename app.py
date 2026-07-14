@@ -25,6 +25,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from src.bioclip_lite.config import LiteConfig, parse_args, resolve_data_paths, setup_logging
+from src.bioclip_lite.instrument import phase
 from src.bioclip_lite.services.image_service import ImageService
 from src.bioclip_lite.services.model_service import ModelService
 from src.bioclip_lite.services.search_service import SearchService
@@ -73,20 +74,27 @@ class BioCLIPLiteApp:
         self.config = config
 
         logger.info("Initializing services...")
-        self.model_service = ModelService(
-            device=config.device, model_str=config.model_str
-        )
-        self.search_service = SearchService(
-            faiss_index_path=config.faiss_index_path,
-            duckdb_path=config.duckdb_path,
-            nprobe=config.default_nprobe,
-            over_fetch_factor=config.over_fetch_factor,
-            metadata_columns=config.METADATA_COLUMNS,
-        )
+        # Cold-start phases are timed explicitly: model load and index/DB load
+        # dominate the first-ever user request and are the headline cold-start cost.
+        with phase("model_load"):
+            self.model_service = ModelService(
+                device=config.device, model_str=config.model_str
+            )
+        with phase("index_load"):
+            self.search_service = SearchService(
+                faiss_index_path=config.faiss_index_path,
+                duckdb_path=config.duckdb_path,
+                nprobe=config.default_nprobe,
+                over_fetch_factor=config.over_fetch_factor,
+                metadata_columns=config.METADATA_COLUMNS,
+            )
         self.image_service = ImageService(
             timeout=config.image_fetch_timeout,
             max_workers=config.image_fetch_max_workers,
             thumbnail_max_dim=config.thumbnail_max_dim,
+            variant=config.thumbnail_variant,
+            enable_cache=config.enable_image_cache,
+            cache_max_bytes=config.image_cache_max_mb * 1024 * 1024,
         )
         logger.info("All services ready.")
 
@@ -108,8 +116,18 @@ class BioCLIPLiteApp:
 
         img_h = _image_hash(img)
         logger.info(f"Image uploaded (hash={img_h[:8]}, size={img.size}), embedding + predicting at rank={rank}")
-        embedding = self.model_service.embed([img], normalize=False)[0].tolist()
-        pred_html = self._predict_html(img, rank)
+        # Single encode: the image features power BOTH the stored search
+        # embedding and the taxonomy prediction (no double forward pass).
+        try:
+            embeddings, preds = self.model_service.embed_and_classify(
+                [img], rank=rank.lower(), k=5, image_hash=img_h
+            )
+            embedding = embeddings[0].tolist()
+            pred_html = self._pred_html(preds[0] if preds else None)
+        except Exception as e:
+            logger.error(f"embed_and_classify failed ({e}); falling back to separate calls")
+            embedding = self.model_service.embed([img], normalize=True)[0].tolist()
+            pred_html = self._predict_html(img, rank)
         return embedding, pred_html, img_h
 
     def search(
@@ -135,7 +153,9 @@ class BioCLIPLiteApp:
             query_vector = np.array(cached_embedding, dtype="float32")
             logger.info("Reusing cached embedding")
         else:
-            query_vector = self.model_service.embed([img], normalize=False)[0]
+            # Hash-keyed encode: shares the upload handler's in-flight embedding
+            # instead of re-encoding when search races ahead of it.
+            query_vector = self.model_service.embed([img], image_hash=current_hash)[0]
             cached_embedding = query_vector.tolist()
             cached_hash = current_hash
 
@@ -154,23 +174,29 @@ class BioCLIPLiteApp:
         logger.info(f"FAISS+DuckDB returned {len(results)} results, fetching images...")
 
         # Fetch images from URLs
-        results = self.image_service.fetch_images(results)
-
-        ok = sum(1 for r in results if r.get("image_status") == "ok")
+        with phase("image_fetch", n=len(results)) as rec:
+            results, fetch_bytes = self.image_service.fetch_images(results)
+            ok = sum(
+                1 for r in results
+                if r.get("image_status") in ("ok", "ok_cached")
+            )
+            rec["ok"] = ok
+            rec["bytes"] = fetch_bytes
         logger.info(f"Image fetch complete: {ok}/{len(results)} succeeded")
 
-        # Build gallery — pass full-res images so Gradio's lightbox popup
-        # shows high quality. Gradio handles grid thumbnail scaling via CSS.
-        gallery_images = []
-        display_metadata = []
-        for r in results:
-            pil_img = r.get("image")
-            if pil_img:
-                gallery_images.append(pil_img)
-            else:
-                label = r.get("species") or r.get("common_name") or "Unknown"
-                gallery_images.append(_placeholder(label))
-            display_metadata.append(r)
+        # Build gallery from the medium thumbnails fetched above; the
+        # full-resolution original is fetched lazily on click (on_gallery_select).
+        with phase("gallery_build", n=len(results)):
+            gallery_images = []
+            display_metadata = []
+            for r in results:
+                pil_img = r.get("image")
+                if pil_img:
+                    gallery_images.append(pil_img)
+                else:
+                    label = r.get("species") or r.get("common_name") or "Unknown"
+                    gallery_images.append(_placeholder(label))
+                display_metadata.append(r)
 
         tree = self._generate_tree_summary(display_metadata)
         return gallery_images, tree, display_metadata, cached_embedding, cached_hash
@@ -178,7 +204,13 @@ class BioCLIPLiteApp:
     def on_gallery_select(
         self, evt: gr.SelectData, metadata_list: List[Dict]
     ) -> Tuple[Optional[Image.Image], str, str, str]:
-        """Handle gallery click — show full-res image + metadata.
+        """Handle gallery click — show full-resolution image + metadata.
+
+        Two-tier images: the gallery only fetched a downsized thumbnail
+        (``meta['image']``, e.g. iNat S3 ``medium``). On click we lazily
+        fetch the full-resolution original once per image and cache it on
+        ``meta['image_full']`` so re-clicks are instant. Falls back to the
+        thumbnail if the original can't be fetched.
 
         Returns (image, header_md, taxonomy_md, source_md).
         """
@@ -188,24 +220,45 @@ class BioCLIPLiteApp:
 
         meta = metadata_list[evt.index]
 
-        # Try to show the already-fetched image (or fetch full-res)
-        img = meta.get("image")
+        # Reuse the full-res image if we already fetched it this session.
+        img = meta.get("image_full")
         if img is None:
             url = meta.get("identifier")
             if url:
-                img, status = self.image_service.fetch_full_resolution(url)
-                if img:
-                    meta["image"] = img
+                # fetch_full_resolution() requests the original URL as-stored
+                # (no size rewrite), so this is the true full-res image.
+                with phase("full_res_fetch", idx=evt.index):
+                    img, _ = self.image_service.fetch_full_resolution(url)
+                if img is not None:
+                    meta["image_full"] = img
+            if img is None:
+                img = meta.get("image")  # fall back to the medium thumbnail
 
         header, taxonomy, source = self._format_metadata(meta, evt.index + 1)
         return img, header, taxonomy, source
 
     def predict_on_rank_change(
-        self, img: Optional[Image.Image], rank: str
+        self,
+        img: Optional[Image.Image],
+        embedding: Optional[List[float]],
+        rank: str,
     ) -> str:
-        """Re-predict when user changes taxonomic rank."""
+        """Re-predict when the user changes taxonomic rank.
+
+        Reuses the stored embedding (= normalized image features) so changing
+        rank costs zero image encodes. Falls back to encoding only if no
+        embedding is available yet.
+        """
         if img is None:
             return _prediction_placeholder()
+        if embedding:
+            try:
+                preds = self.model_service.classify_from_embedding(
+                    embedding, rank=rank.lower(), k=5
+                )
+                return self._pred_html(preds[0] if preds else None)
+            except Exception as e:
+                logger.error(f"classify_from_embedding failed ({e}); re-encoding")
         return self._predict_html(img, rank)
 
     def export_results(self, metadata_list: List[Dict]) -> Optional[str]:
@@ -234,15 +287,20 @@ class BioCLIPLiteApp:
     # ------------------------------------------------------------------
 
     def _predict_html(self, img: Image.Image, rank: str, k: int = 5) -> str:
-        """Generate prediction HTML."""
+        """Generate prediction HTML by encoding the image (fallback path)."""
         try:
             preds = self.model_service.predict([img], rank=rank.lower(), k=k)
-            if preds and preds[0]:
-                return _format_predictions(preds[0], rank)
-            return "<p style='color:#f88;'>No predictions returned.</p>"
+            return self._pred_html(preds[0] if preds else None)
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
             return f"<p style='color:#f88;'>Prediction error: {e}</p>"
+
+    @staticmethod
+    def _pred_html(preds_for_image: Optional[List[Dict]]) -> str:
+        """Format a single image's prediction list into HTML."""
+        if preds_for_image:
+            return _format_predictions(preds_for_image)
+        return "<p style='color:#f88;'>No predictions returned.</p>"
 
     @staticmethod
     def _format_metadata(meta: Dict, rank: int) -> Tuple[str, str, str]:
@@ -487,10 +545,10 @@ class BioCLIPLiteApp:
                 ],
             )
 
-            # Re-predict on rank change
+            # Re-predict on rank change (reuses stored embedding — no encode)
             rank_dropdown.change(
                 self.predict_on_rank_change,
-                inputs=[img, rank_dropdown],
+                inputs=[img, embedding_state, rank_dropdown],
                 outputs=[prediction_output],
             )
 
@@ -520,7 +578,7 @@ def _prediction_placeholder() -> str:
     return "<p style='color:#888;'>Upload an image to get predictions.</p>"
 
 
-def _format_predictions(predictions: List[Dict], rank: str) -> str:
+def _format_predictions(predictions: List[Dict]) -> str:
     if not predictions:
         return "<p style='color:#888;'>No predictions available.</p>"
 

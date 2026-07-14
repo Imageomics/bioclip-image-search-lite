@@ -5,13 +5,13 @@ Replaces SQLite with DuckDB and adds scope filtering.
 """
 
 import logging
-import time
-import functools
 from typing import List, Dict, Any, Optional
 
 import duckdb
 import faiss
 import numpy as np
+
+from ..instrument import phase
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +21,6 @@ SCOPE_MAP = {
     "iNaturalist Only": "inaturalist",
     "BioCLIP 2 Training": "bioclip2_training",
 }
-
-
-def _timer(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        t0 = time.perf_counter()
-        result = func(*args, **kwargs)
-        dt = time.perf_counter() - t0
-        logger.info(f"{func.__name__} completed in {dt:.4f}s")
-        return result
-    return wrapper
 
 
 class SearchService:
@@ -67,7 +56,6 @@ class SearchService:
         # Reconstructs full URLs in Python instead of a SQL JOIN.
         self._url_prefixes = self._load_url_prefixes()
 
-    @_timer
     def search(
         self,
         query_vector: np.ndarray,
@@ -108,7 +96,8 @@ class SearchService:
 
         # Over-fetch to compensate for scope filtering
         fetch_n = top_n * self.over_fetch_factor
-        distances, indices = self.index.search(queries, fetch_n)
+        with phase("faiss", fetch_n=fetch_n, nprobe=self.index.nprobe):
+            distances, indices = self.index.search(queries, fetch_n)
 
         # Collect valid IDs
         ids = []
@@ -122,7 +111,8 @@ class SearchService:
             return []
 
         # DuckDB metadata lookup with scope filter
-        results = self._query_metadata(ids, dists, scope)
+        with phase("duckdb", n_ids=len(ids), scope=scope):
+            results = self._query_metadata(ids, dists, scope)
         return results[:top_n]
 
     def _query_metadata(

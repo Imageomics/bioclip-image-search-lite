@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -45,6 +46,14 @@ class LiteConfig:
     image_fetch_timeout: int = 10
     image_fetch_max_workers: int = 8
     thumbnail_max_dim: int = 256
+    # iNat S3 size variant to request (None=as-stored/original). One of
+    # original|large|medium|small|thumb. medium ≈ 10x less bandwidth and is
+    # visually identical in the 256px gallery; full-res is fetched on click.
+    thumbnail_variant: Optional[str] = "medium"
+    # Shared process-level image cache (caches hits + permanent misses).
+    enable_image_cache: bool = True
+    # Thumbnail cache budget in MB (byte-bounded LRU). Full-res bypasses it.
+    image_cache_max_mb: int = 512
 
     # Metadata columns to SELECT from optimized DB.
     # URL is split into url_prefix_id + identifier_suffix; reconstructed in Python.
@@ -97,6 +106,12 @@ def setup_logging(config: LiteConfig) -> None:
     for name in ("httpx", "httpcore", "urllib3", "gradio", "uvicorn"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
+    # Silence the repeated Starlette deprecation warning Gradio emits on every
+    # request (HTTP_422_UNPROCESSABLE_ENTITY) — pure noise, not actionable here.
+    warnings.filterwarnings(
+        "ignore", message=".*HTTP_422_UNPROCESSABLE_ENTITY.*"
+    )
+
 
 def resolve_data_paths(config: LiteConfig) -> LiteConfig:
     """Resolve FAISS index and DuckDB paths, downloading from HF if needed.
@@ -148,6 +163,25 @@ def parse_args() -> LiteConfig:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=7860)
     p.add_argument("--enable-export", action="store_true")
+    # Defaults come from LiteConfig so the no-flag path (e.g. `python app.py`
+    # on a HF Space) honors the same product defaults as programmatic use.
+    _d = LiteConfig()
+    p.add_argument(
+        "--thumbnail-variant", default=_d.thumbnail_variant,
+        choices=["original", "large", "medium", "small", "thumb"],
+        help=f"iNat S3 size variant to fetch for the gallery (default: {_d.thumbnail_variant}).",
+    )
+    p.add_argument(
+        "--image-cache", action=argparse.BooleanOptionalAction,
+        default=_d.enable_image_cache,
+        help="Process-level image cache for fetched thumbnails "
+             f"(default: {'on' if _d.enable_image_cache else 'off'}; "
+             "--no-image-cache to disable).",
+    )
+    p.add_argument(
+        "--image-cache-mb", type=int, default=_d.image_cache_max_mb,
+        help=f"Thumbnail cache budget in MB, byte-bounded LRU (default: {_d.image_cache_max_mb}).",
+    )
     p.add_argument(
         "--log-dir", default=None,
         help="Directory for log files. If set, writes DEBUG-level logs to a timestamped file.",
@@ -168,6 +202,9 @@ def parse_args() -> LiteConfig:
         enable_export=args.enable_export,
         log_dir=args.log_dir,
         log_level=args.log_level,
+        thumbnail_variant=args.thumbnail_variant,
+        enable_image_cache=args.image_cache,
+        image_cache_max_mb=args.image_cache_mb,
     )
     if args.model_str:
         cfg.model_str = args.model_str

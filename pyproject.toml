@@ -23,5 +23,9 @@ dependencies = [
 gpu = ["faiss-gpu-cu12"]
 dev = ["pytest", "black", "isort"]
 
+
 [tool.hatch.version]
 path = "src/bioclip_lite/__about__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bioclip_lite"]
