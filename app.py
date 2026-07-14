@@ -75,8 +75,7 @@ class BioCLIPLiteApp:
 
         logger.info("Initializing services...")
         # Cold-start phases are timed explicitly: model load and index/DB load
-        # dominate the first-ever user request and are the headline cold-start
-        # cost (see docs/ux-image-fetch-issue.md).
+        # dominate the first-ever user request and are the headline cold-start cost.
         with phase("model_load"):
             self.model_service = ModelService(
                 device=config.device, model_str=config.model_str
