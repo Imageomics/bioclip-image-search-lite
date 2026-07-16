@@ -40,7 +40,13 @@ CSS = """
 .app-footer a { color: #f0a030 !important; }
 """
 
-SCOPE_CHOICES = ["All Sources", "URL-Available Only", "iNaturalist Only", "BioCLIP 2 Training"]
+SCOPE_CHOICES = [
+    "All Sources",
+    "URL-Available Only",
+    "iNaturalist Only",
+    "BioCLIP 2 Training",
+    "BioCLIP 2.5 Huge Training",
+]
 
 # Columns written to the results-metadata CSV export, in order. The source
 # result dict stores the reconstructed source URL under "identifier"; it is

@@ -24,8 +24,8 @@ tags:
 size_categories:
 - 100M<n<1B
 description: >-
-  Pre-computed FAISS index (~200M BioCLIP-2 embeddings) and DuckDB metadata
-  database (234M rows) for image similarity search across the TreeOfLife-200M dataset. No images from the source dataset are redistributed.
+  Pre-computed FAISS index (~239.6M BioCLIP-2 embeddings) and DuckDB metadata
+  database (239.6M rows) for image similarity search across the TreeOfLife-200M dataset (240M_v1.1 catalog). No images from the source dataset are redistributed.
 datasets:
   - imageomics/TreeOfLife-200M
   - GBIF
@@ -47,7 +47,7 @@ Pre-computed [FAISS](https://github.com/facebookresearch/faiss/wiki) index and [
 [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) application —
 a lightweight image similarity search engine over the 200M+ organism images from the [TreeOfLife-200M dataset](https://huggingface.co/datasets/imageomics/TreeOfLife-200M).
 
-The **FAISS index** enables sub-second approximate nearest-neighbor search over ~200M image embeddings, while the **DuckDB database** maps each search record back to its source image URL and other associated metadata. 
+The **FAISS index** enables sub-second approximate nearest-neighbor search over 239.6M image embeddings, while the **DuckDB database** maps each search record back to its source image URL (where available) and other associated metadata. 
 
 > **Why a model repo?** Though this is a data repository, it is hosted as a Hugging Face "model" repo because model repos provide 50 GB of free storage and can be [pre-loaded into a Hugging Face Space](https://huggingface.co/docs/hub/en/spaces-sdks-docker#preloading-models-and-other-data), keeping the index in memory while the Space is active. This lite application relies on URLs that can be queried in real-time to avoid the 92 TB local image storage overhead of the full image set.
 
@@ -65,8 +65,8 @@ The **FAISS index** enables sub-second approximate nearest-neighbor search over 
 
 This repository contains two compute artifacts derived from the [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) dataset:
 
-1. **FAISS index** — A trained approximate nearest-neighbor index over ~200M [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) image embeddings, enabling sub-second similarity search. See [Data Collection and Processing](#data-collection-and-processing) for more details.
-2. **DuckDB metadata database** — A 234M-row database mapping each image to its taxonomic classification, source provenance, and original URL.
+1. **FAISS index** — A trained approximate nearest-neighbor index over 239.6M [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) image embeddings, enabling sub-second similarity search. See [Data Collection and Processing](#data-collection-and-processing) for more details.
+2. **DuckDB metadata database** — A 239.6M-row database mapping each image to its taxonomic classification, source provenance, and (where available) original URL.
 
 Together, these enable a full image similarity search pipeline: embed a query image with BioCLIP 2, search the FAISS index for nearest neighbors, and look up rich metadata and source image URLs via DuckDB.
 
@@ -86,9 +86,9 @@ Together, these enable a full image similarity search pipeline: embed a query im
 ```
 imageomics/bioclip-image-search-lite/
     faiss/
-        index.index          # FAISS IVF+PQ index (~5.8 GB, ~200M vectors)
+        index.index          # FAISS IVF+PQ index (~6 GB, 239.6M vectors)
     duckdb/
-        metadata.duckdb      # DuckDB metadata database (~14 GB optimized, 234M rows)
+        metadata.duckdb      # DuckDB metadata database (~15 GB optimized, 239.6M rows)
 ```
 
 ### FAISS Index
@@ -96,12 +96,12 @@ imageomics/bioclip-image-search-lite/
 | Property | Value |
 |----------|-------|
 | **Index type** | `IVF65536,PQ16` ([Inverted File Index](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes#cell-probe-methods-indexivf-indexes) with [Product Quantization](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes#indexivfpq)) |
-| **Vectors** | ~200M |
+| **Vectors** | 239,594,422 |
 | **Dimensions** | 768 (BioCLIP 2 ViT-L/14 output) |
 | **Normalization** | L2-normalized (inner product ≈ cosine similarity) |
 | **IVF cells** | 65,536 Voronoi partitions |
 | **PQ encoding** | 16 sub-quantizers, 48 dims each, 256 centroids per sub-quantizer (16 bytes/vector) |
-| **File size** | ~5.8 GB |
+| **File size** | ~6 GB (PQ codes for 239.6M vectors + 192 MB IVF centroids + ~1 MB PQ codebooks; per-vector storage is 16 bytes) |
 
 **Search parameters:**
 - `nprobe` controls accuracy vs. speed (default: 16, range: 1–128). Higher values probe more IVF cells, increasing recall at the cost of latency.
@@ -109,7 +109,7 @@ imageomics/bioclip-image-search-lite/
 
 ### DuckDB Metadata Schema
 
-**Table:** `metadata` — 234,391,308 rows
+**Table:** `metadata` — 239,594,422 rows
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -122,7 +122,7 @@ imageomics/bioclip-image-search-lite/
 | `family` | `VARCHAR` | Family classification. |
 | `genus` | `VARCHAR` | Genus classification. |
 | `species` | `VARCHAR` | Species epithet (specific epithet only). |
-| `common_name` | `VARCHAR` | Vernacular/common name where available (sourced from GBIF Backbone Taxonomy). Corresponds to `common` in TreeOfLife-200M catalog. |
+| `common_name` | `VARCHAR` | Vernacular/common name where available. Corresponds to `common` in TreeOfLife-200M catalog. |
 | `source_dataset` | `VARCHAR` | Data source: `gbif`, `eol`, `bioscan`, or `fathomnet`. Corresponds to `data_source` in TreeOfLife-200M catalog. |
 | `source_id` | `VARCHAR` | Unique identifier from source (e.g., GBIF `gbifID`, EOL content/page ID). |
 | `publisher` | `VARCHAR` | Organization that published the data (GBIF records only, e.g., `iNaturalist`). |
@@ -130,7 +130,8 @@ imageomics/bioclip-image-search-lite/
 | `url_prefix_id` | `USMALLINT` | Foreign key into the `url_prefixes` lookup table. Together with `identifier_suffix`, reconstructs the full image URL as `<prefix><suffix>`. See [URL reconstruction](#url-reconstruction) below. |
 | `identifier_suffix` | `VARCHAR` | Path portion of the image URL (always starts with `/`, e.g., `/photos/12345/original.jpg`). `NULL` if no URL is available. |
 | `has_url` | `BOOLEAN` | Materialized flag: `TRUE` if a URL is available. Used for scope filtering. |
-| `in_bioclip2_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2 training data — TreeOfLife-200M (Revision [a8f38b4](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12)). |
+| `in_bioclip2_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2 training data. TreeOfLife-200M (Revision [a8f38b4](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12)). |
+| `in_bioclip2_5_training` | `BOOLEAN` | `TRUE` if the record's UUID appears in the BioCLIP 2.5 Huge training data — TreeOfLife-200M (Revision [TODO](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/TODO)). |
 
 **Table:** `url_prefixes` — 411 rows
 
@@ -180,7 +181,8 @@ Prefixes are bare domains (e.g., `https://content.eol.org`) and suffixes always 
 | `url_prefix_id` | `source_url` | Split from `source_url`; foreign key to `url_prefixes` |
 | `identifier_suffix` | `source_url` | Split from `source_url`; path portion of URL |
 | `has_url` | — | Derived; materialized boolean |
-| `in_bioclip2_training` | — | Derived; matched against [training catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/a8f38b4388579862c56ae57d6f094c2ac0e92e12/dataset/catalog.parquet) |
+| `in_bioclip2_training` | — | Derived; matched against [TOL-200M catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/a8f38b4388579862c56ae57d6f094c2ac0e92e12/dataset/catalog.parquet) |
+| `in_bioclip2_5_training` | — | Derived; matched against [training catalog revision `TODO`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/TODO/dataset/catalog.parquet) |
 | All others | Same name | Direct mapping |
 
 **Columns from TreeOfLife-200M catalog not included:** `scientific_name`, `basis_of_record`, `shard_filename`, `shard_file_path`, `base_dataset_file_path`, `resolution_status`.
@@ -195,13 +197,19 @@ For more background on these columns, please see the [data field descriptions fr
 
 | Scope | Count | Percentage |
 |-------|-------|------------|
-| Total rows | 234,391,308 | 100% |
-| With URL (`has_url = TRUE`) | ~234M | 99.99% |
-| iNaturalist (`source_dataset = 'gbif' AND publisher LIKE '%iNaturalist%'`) | ~136M | 58% |
-| In BioCLIP 2 training (`in_bioclip2_training = TRUE`) | ~206M | 87.9% |
-| With taxonomy (`kingdom IS NOT NULL`) | ~228M | 97.2% |
+| Total rows | 239,594,422 | 100% |
+| With URL (`has_url = TRUE`) | 234,443,572 | 97.85% |
+| iNaturalist (`source_dataset = 'gbif' AND publisher LIKE '%iNaturalist%'`) | ~135M | ~56% |
+| In BioCLIP 2 training (`in_bioclip2_training = TRUE`) | 211,152,120 | 88.13% |
+| In BioCLIP 2.5 Huge training (`in_bioclip2_5_training = TRUE`) | 233,046,435 | 97.27% |
+| Without URL (BIOSCAN-5M specimens) | 5,150,850 | 2.15% |
 
-> **Note on `in_bioclip2_training`:** This column identifies records whose UUID matches the BioCLIP 2 training catalog from [TreeOfLife-200M revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/a8f38b4388579862c56ae57d6f094c2ac0e92e12). The original BioCLIP 2 training set contained ~214M images. Of these, ~206M match records in the search corpus. The remaining ~8M were excluded from the FAISS index because they were identified as invalid after training (e.g., document scans, specimen labels, images with detected human faces) and removed during a post-training data cleanup before the embeddings were generated.
+> **Note on training flags:**
+>
+> - `in_bioclip2_training` identifies records whose UUID is in the BioCLIP 2 training catalog ([TreeOfLife-200M catalog revision `a8f38b4`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/blob/a8f38b4388579862c56ae57d6f094c2ac0e92e12/dataset/catalog.parquet)). Not all records from the catalog `a8f38b4` are included in the index, as some records are later identified as invalid images for model training. 
+> - `in_bioclip2_5_training` identifies records whose UUID matches the BioCLIP 2.5 Huge training catalog from [TreeOfLife-200M revision `TODO`](https://huggingface.co/datasets/imageomics/TreeOfLife-200M/tree/TODO). 233,046,435 rows (97.3%) carry this flag. The non-overlap with the FAISS index (239.6M) reflects ~6.5M rows that are present in the embedding store / metadata corpus but were not included in the BioCLIP 2.5 Huge training WebDataset shards.
+>
+> **Note on BIOSCAN-5M coverage:** All 5,150,850 BIOSCAN-5M specimen rows are included in the FAISS index and the `metadata` table for similarity search and taxonomy resolution, but they have no `identifier_suffix`/`url_prefix_id` and thus `has_url = FALSE`. The bioscan source does not provide public URLs for image retrieval; downstream applications cannot display these rows as thumbnails. If a UI surface needs to hide them, filter on `has_url = TRUE` or use the "URL-Available Only" scope.
 
 ### Data Splits
 
@@ -294,7 +302,7 @@ for _, row in results.iterrows():
 
 ### Curation Rationale
 
-The full [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) stores 234M images totaling ~92 TB — far too large for lightweight deployment. [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) was created to make the similarity search capability accessible on constrained infrastructure (e.g., Hugging Face Spaces free tier: 2 vCPU, 16 GB RAM, 50 GB disk) by:
+The full [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) stores 239.6M images totaling ~92 TB — far too large for lightweight deployment. [BioCLIP Image Search Lite](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) was created to make the similarity search capability accessible on constrained infrastructure (e.g., Hugging Face Spaces free tier: 2 vCPU, 16 GB RAM, 50 GB disk) by:
 
 1. Replacing local image storage with on-demand URL fetching from publicly accessible external sources (primarily [iNaturalist AWS Open Data](https://github.com/inaturalist/inaturalist-open-data) S3).
 2. Compressing the metadata from an 80 GB SQLite database to a ~14 GB DuckDB database (optimized via ENUM types, URL prefix deduplication, taxonomy sorting, and columnar compression).
@@ -326,7 +334,7 @@ All 200M+ images in [TreeOfLife-200M](https://huggingface.co/datasets/imageomics
 
 1. **Stratified sampling** (Spark, 80 executors): ~15–20M representative vectors sampled from the full corpus, stratified by taxonomic class using capped proportional sampling (seed=42).
 2. **Index training** (1 GPU): An `IVF65536,PQ16` index was trained on the stratified sample to learn 65,536 IVF centroids and the PQ codebook.
-3. **Vector insertion** (8 parallel GPU jobs): All ~200M L2-normalized vectors were added to the trained index in parallel shards (batch size 3M).
+3. **Vector insertion** (8 parallel GPU jobs on H100): All 239.6M L2-normalized vectors were added to the trained index in parallel shards (batch size 3M).
 4. **Merge** (CPU, 64 GB RAM): All shards were merged into the final index.
 
 Full training scripts: [Imageomics/bioclip-vector-db/scripts/](https://github.com/Imageomics/bioclip-vector-db/blob/feature/model_server/scripts/).
@@ -335,19 +343,7 @@ For additional information on FAISS index types and search parameters, see the [
 
 **Metadata → DuckDB:**
 
-The DuckDB metadata database was assembled from two sources produced by the [BioCLIP Vector DB](https://github.com/Imageomics/bioclip-vector-db) project:
-
-1. **FAISS ID ↔ UUID mapping** — A "flight plan" created *before* FAISS training ([`create_lookup.py`](https://github.com/Imageomics/bioclip-vector-db/blob/feature/model_server/src/bioclip_vector_db/batch/create_lookup.py)). This scans all source embedding files and assigns deterministic integer IDs to each record, producing a manifest that maps `id` → `uuid` and ensures contiguous ID space matching the FAISS vector positions.
-2. **UUID ↔ catalog metadata** — Taxonomic and provenance metadata derived from the [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M) catalog (see [column mapping](#duckdb-metadata-schema) above).
-
-The Lite repo merged these into a single DuckDB database ([`convert_duckdb_lite.py`](https://github.com/Imageomics/bioclip-image-search-lite/blob/main/scripts/data/convert_duckdb_lite.py)) with the following optimizations:
-
-- Added materialized boolean columns `has_url` and `in_bioclip2_training` for scope filtering.
-- Created indexes: `idx_id` on `id` (primary FAISS lookup) and `idx_scope` on `(source_dataset, has_url, in_bioclip2_training)`.
-- Applied ENUM types for low-cardinality columns, URL prefix deduplication, and taxonomy-based row sorting for better compression.
-- Leveraged DuckDB's columnar storage and compression, reducing the database from ~80 GB (SQLite) to ~14 GB.
-
-**Metadata backfill (March 2026):** 28.3M rows (12.1%) originally had NULL metadata because the entire `observation.org` GBIF server (27.2M rows) was missing from the metadata parquets used during ingestion. Taxonomy was recovered for ~21.7M rows from the resolved taxa pipeline, and source URLs were recovered for all 27.2M rows from the GBIF data parquets. An additional 1.1M EOL rows with failed taxonomy resolution had their `source_dataset` and `source_id` recovered. UUIDs were also normalized from mixed formats (non-hyphenated for observation.org rows) to a consistent hyphenated format. After backfill, only 2,973 rows remain with NULL `source_dataset`.
+TODO: Rewrite. 
 
 #### Source Data Producers
 
@@ -369,6 +365,7 @@ This dataset does not include annotations created specifically for this reposito
 
 This dataset inherits biases and considerations from [TreeOfLife-200M](https://huggingface.co/datasets/imageomics/TreeOfLife-200M#considerations-for-using-the-data). The following are exaggerated in this instance (BioCLIP Image Search Lite) due to available image representation (those readily fetched by URL):
 
+- **BIOSCAN-5M images cannot be displayed.** All 5,150,850 BIOSCAN-5M specimen rows are present in the FAISS index and the DuckDB `metadata` table for similarity search and taxonomy resolution, but BIOSCAN does not publish per-image URLs, so these rows have `has_url = FALSE` and no `identifier_suffix`. Downstream applications cannot fetch thumbnails for them; the [BioCLIP Image Search Lite Space](https://huggingface.co/spaces/imageomics/bioclip-image-search-lite) shows them as placeholder tiles. To exclude them entirely from results, use the "URL-Available Only" scope (sets `has_url = TRUE`).
 - **Taxonomic coverage is uneven.** Despite including 952K+ unique taxa, coverage is heavily biased toward well-photographed organisms. Citizen science observations (primarily iNaturalist) comprise ~58% of the data, skewing representation toward charismatic species and regions where citizen science is most active (Western/developed countries).
 - **Incomplete taxonomic labels.** As inherited from TreeOfLife-200M, ~97% of records now have kingdom-level taxonomy after the March 2026 backfill. The remaining ~3% lack complete labels due to biodiversity data complexities (`NULL` values at lower ranks).
 - **URL availability is not guaranteed.** After the metadata backfill, nearly all records (99.99%) have source URLs, though images may become unavailable over time due to URL rot, server changes, or content removal.
